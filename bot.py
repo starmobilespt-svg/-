@@ -1,9 +1,24 @@
+import os
 import sqlite3
 import telebot
 from telebot import types
-import csv
-import io
-import os
+import threading
+from flask import Flask
+
+# ----------------- Render အတွက် Web Server (Port ဖွင့်ရန်) -----------------
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Accounting Bot is running 24/7!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# Flask ကို Background တွင် အလုပ်လုပ်ခိုင်းခြင်း
+threading.Thread(target=run_flask, daemon=True).start()
+# -------------------------------------------------------------------------
 
 TOKEN = "8580240882:AAHJYpwlC5adLcdxXZIOa5XDL80Xj7Jvg9s"
 bot = telebot.TeleBot(TOKEN)
@@ -31,7 +46,7 @@ def main_menu():
     markup.add(types.KeyboardButton("➕ ဝင်ငွေမှတ်မည်"), types.KeyboardButton("➖ ထွက်ငွေမှတ်မည်"))
     markup.add(types.KeyboardButton("📅 ဒီနေ့စာရင်း"), types.KeyboardButton("🗓 ဒီလစာရင်း"))
     markup.add(types.KeyboardButton("💰 စုစုပေါင်းလက်ကျန်"), types.KeyboardButton("❌ စာရင်းဖျက်မည်"))
-    markup.add(types.KeyboardButton("📥 Excel ထုတ်မည်"), types.KeyboardButton("💾 Backup ယူမည်"))
+    markup.add(types.KeyboardButton("💾 Backup ယူမည်"), types.KeyboardButton("🔄 Backup ပြန်ထည့်ရန်"))
     markup.add(types.KeyboardButton("🔄 စာရင်းအသစ်ပြန်စမည်"))
     return markup
 
@@ -39,10 +54,9 @@ def main_menu():
 def send_welcome(message):
     text = (
         "မင်္ဂလာပါ! စာရင်းကိုင် Bot မှ ကြိုဆိုပါတယ်။\n"
-        "အောက်ပါ ခလုတ်များကို နှိပ်၍ အသုံးပြုနိုင်ပါသည်။\n\n"
-        "📥 *Backup ဖိုင်ပြန်ထည့်လိုပါက:* `accounting.db` ဖိုင်ကို Bot ထဲသို့ Document ပုံစံဖြင့် တိုက်ရိုက် ပို့ပေးနိုင်ပါသည်။"
+        "အောက်ပါ ခလုတ်များကို နှိပ်၍ အသုံးပြုနိုင်ပါသည်။"
     )
-    bot.send_message(message.chat.id, text, reply_markup=main_menu(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, text, reply_markup=main_menu())
 
 # ----------------- စာရင်းမှတ်ခြင်း -----------------
 @bot.message_handler(func=lambda m: m.text in ["➕ ဝင်ငွေမှတ်မည်", "➖ ထွက်ငွေမှတ်မည်"])
@@ -134,43 +148,22 @@ def check_total_balance(message):
     text = f"🏦 စုစုပေါင်း စာရင်းချုပ်\n\n🟢 ဝင်ငွေ: {total_income:,.0f} ကျပ်\n🔴 ထွက်ငွေ: {total_expense:,.0f} ကျပ်\n---------------------------\n💰 လက်ရှိကျန်ငွေ: {(total_income - total_expense):,.0f} ကျပ်"
     bot.send_message(message.chat.id, text)
 
-# ----------------- Excel ထုတ်ခြင်း -----------------
-@bot.message_handler(func=lambda m: m.text == "📥 Excel ထုတ်မည်")
-def export_excel(message):
-    user_id = message.from_user.id
-    conn = sqlite3.connect('accounting.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT date, type, amount, note FROM transactions WHERE user_id=? ORDER BY date DESC", (user_id,))
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        bot.send_message(message.chat.id, "ထုတ်ယူရန် စာရင်းမရှိသေးပါ။")
-        return
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Date", "Type", "Amount", "Note"])
-    for r in rows:
-        t_type = "Income" if r[1] == 'income' else "Expense"
-        writer.writerow([r[0], t_type, r[2], r[3]])
-    
-    bio = io.BytesIO(output.getvalue().encode('utf-8-sig'))
-    bio.name = f'Transactions_{message.from_user.username or user_id}.csv'
-    bot.send_document(message.chat.id, bio, caption="📊 စာရင်းမှတ်တမ်း Excel (.csv) ဖိုင် ရပါပြီ။")
-
 # ----------------- Backup ယူခြင်းနှင့် Restore ပြုလုပ်ခြင်း -----------------
 @bot.message_handler(func=lambda m: m.text == "💾 Backup ယူမည်")
 def backup_db(message):
     if os.path.exists('accounting.db'):
         with open('accounting.db', 'rb') as f:
-            bot.send_document(message.chat.id, f, caption="💾 Database Backup ဖိုင် ရပါပြီ။\n(ဤဖိုင်ကို သိမ်းထားပါ / လိုအပ်လျှင် Bot ထဲသို့ ပြန်ပို့၍ Restore လုပ်နိုင်ပါသည်။)")
+            bot.send_document(message.chat.id, f, caption="💾 Database Backup ဖိုင် ရပါပြီ။\n(ဤဖိုင်ကို သိမ်းထားပါ / လိုအပ်လျှင် '🔄 Backup ပြန်ထည့်ရန်' ကိုနှိပ်ပြီး ပြန်တင်နိုင်ပါသည်။)")
     else:
         bot.send_message(message.chat.id, "Database ဖိုင် မတွေ့ပါ။")
 
-@bot.message_handler(content_types=['document'])
-def restore_backup(message):
-    if message.document.file_name == 'accounting.db':
+@bot.message_handler(func=lambda m: m.text == "🔄 Backup ပြန်ထည့်ရန်")
+def ask_for_backup(message):
+    msg = bot.send_message(message.chat.id, "📥 ကျေးဇူးပြု၍ သင့်ရဲ့ Backup ဖိုင် (`accounting.db`) ကို **Document** ပုံစံဖြင့် ဤချတ်ထဲသို့ ပို့ပေးပါခင်ဗျာ။")
+    bot.register_next_step_handler(msg, process_restore_file)
+
+def process_restore_file(message):
+    if message.document:
         try:
             file_info = bot.get_file(message.document.file_id)
             downloaded_file = bot.download_file(file_info.file_path)
@@ -178,11 +171,11 @@ def restore_backup(message):
             with open('accounting.db', 'wb') as f:
                 f.write(downloaded_file)
 
-            bot.reply_to(message, "✅ Backup ဖိုင်ကို အောင်မြင်စွာ ပြန်လည်ထည့်သွင်း (Restore) ပြီးပါပြီ။ စာရင်းဟောင်းများ အားလုံး ပုံမှန်အတိုင်း ပြန်ရောက်သွားပါပြီ!")
+            bot.reply_to(message, "✅ Backup ဖိုင်ကို အောင်မြင်စွာ ပြန်လည်ထည့်သွင်း (Restore) ပြီးပါပြီ။ စာရင်းဟောင်းများ အားလုံး ပုံမှန်အတိုင်း ပြန်ရောက်သွားပါပြီ!", reply_markup=main_menu())
         except Exception as e:
-            bot.reply_to(message, "❌ Backup ဖိုင်ထည့်သွင်းရာတွင် အမှားအယွင်း ရှိသွားပါသည်။")
+            bot.reply_to(message, "❌ ဖိုင်ထည့်သွင်းရာတွင် အမှားအယွင်း ရှိသွားပါသည်။", reply_markup=main_menu())
     else:
-        bot.reply_to(message, "⚠️ ကျေးဇူးပြု၍ `accounting.db` အမည်ရှိသော Backup ဖိုင်ကိုသာ Document ပုံစံဖြင့် ပို့ပေးပါ။")
+        bot.send_message(message.chat.id, "⚠️ ကျေးဇူးပြု၍ `accounting.db` ဖိုင်ကိုသာ Document ဖြင့် ပို့ပေးပါ။ လုပ်ဆောင်ချက်ကို ပယ်ဖျက်လိုက်ပါပြီ။", reply_markup=main_menu())
 
 # ----------------- စာရင်းဖျက်ခြင်း -----------------
 @bot.message_handler(func=lambda m: m.text == "❌ စာရင်းဖျက်မည်")
@@ -244,6 +237,5 @@ def handle_reset_choice(call):
     elif call.data == "cancel_reset":
         bot.edit_message_text("❌ လုပ်ဆောင်ချက်ကို ပယ်ဖျက်လိုက်ပါသည်။", call.message.chat.id, call.message.message_id)
 
-print("Full Accounting Bot is running successfully...")
+print("Accounting Bot is running successfully...")
 bot.infinity_polling()
-    
