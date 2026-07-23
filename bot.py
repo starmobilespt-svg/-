@@ -1,7 +1,6 @@
 import sqlite3
 import telebot
 from telebot import types
-import csv
 import io
 import os
 
@@ -77,7 +76,8 @@ def main_menu():
     markup.add(types.KeyboardButton("➕ ဝင်ငွေမှတ်မည်"), types.KeyboardButton("➖ ထွက်ငွေမှတ်မည်"))
     markup.add(types.KeyboardButton("📅 ဒီနေ့စာရင်း"), types.KeyboardButton("🗓 ဒီလစာရင်း"))
     markup.add(types.KeyboardButton("💰 စုစုပေါင်းလက်ကျန်"), types.KeyboardButton("❌ စာရင်းဖျက်မည်"))
-    markup.add(types.KeyboardButton("📥 Excel ထုတ်မည်"), types.KeyboardButton("💾 Backup ယူမည်"))
+    # Excel ဖယ်ထုတ်ပြီး Recover အစားထိုးလိုက်ပါသည်
+    markup.add(types.KeyboardButton("💾 Backup ယူမည်"), types.KeyboardButton("♻️ Recover လုပ်မည်"))
     markup.add(types.KeyboardButton("🔄 စာရင်းအသစ်ပြန်စမည်"))
     return markup
 
@@ -181,41 +181,43 @@ def check_total_balance(message):
     text = f"🏦 စုစုပေါင်း စာရင်းချုပ်\n\n🟢 ဝင်ငွေ: {total_income:,.0f} ကျပ်\n🔴 ထွက်ငွေ: {total_expense:,.0f} ကျပ်\n---------------------------\n💰 လက်ရှိကျန်ငွေ: {(total_income - total_expense):,.0f} ကျပ်"
     bot.send_message(message.chat.id, text)
 
-# ----------------- Feature အသစ်များ (Excel / Backup / Delete) -----------------
-@bot.message_handler(func=lambda m: m.text == "📥 Excel ထုတ်မည်")
-@check_channel
-def export_excel(message):
-    user_id = message.from_user.id
-    conn = sqlite3.connect('accounting.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT date, type, amount, note FROM transactions WHERE user_id=? ORDER BY date DESC", (user_id,))
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        bot.send_message(message.chat.id, "ထုတ်ယူရန် စာရင်းမရှိသေးပါ။")
-        return
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Date", "Type", "Amount", "Note"])
-    for r in rows:
-        t_type = "Income" if r[1] == 'income' else "Expense"
-        writer.writerow([r[0], t_type, r[2], r[3]])
-    
-    bio = io.BytesIO(output.getvalue().encode('utf-8-sig'))
-    bio.name = f'Transactions_{message.from_user.username or user_id}.csv'
-    bot.send_document(message.chat.id, bio, caption="📊 စာရင်းမှတ်တမ်း Excel (.csv) ဖိုင် ရပါပြီ။")
-
+# ----------------- Backup & Recover -----------------
 @bot.message_handler(func=lambda m: m.text == "💾 Backup ယူမည်")
 @check_channel
 def backup_db(message):
     if os.path.exists('accounting.db'):
         with open('accounting.db', 'rb') as f:
-            bot.send_document(message.chat.id, f, caption="💾 Database Backup ဖိုင် ရပါပြီ။\n(ဤဖိုင်ကို သိမ်းထားပါက စာရင်းများ ဘယ်တော့မှ မပျောက်တော့ပါ။)")
+            bot.send_document(message.chat.id, f, caption="💾 Database Backup ဖိုင် ရပါပြီ။\n\n(ဤဖိုင်ကို သိမ်းထားပါက နောက်ပိုင်းတွင် '♻️ Recover လုပ်မည်' မှတဆင့် စာရင်းများ ပြန်လည်ထည့်သွင်းနိုင်ပါသည်။)")
     else:
         bot.send_message(message.chat.id, "Database ဖိုင် မတွေ့ပါ။")
 
+@bot.message_handler(func=lambda m: m.text == "♻️ Recover လုပ်မည်")
+@check_channel
+def prompt_recover(message):
+    text = "🔄 **Data ပြန်လည်ထည့်သွင်းရန်**\n\nကျေးဇူးပြု၍ သင် ယခင်က Backup ယူထားသော `accounting.db` ဖိုင်ကို ဤ Chat သို့ (Document အနေဖြင့်) ပေးပို့ပါ။\n\n⚠️ (သတိပြုရန် - ယခု Recover လုပ်ပါက လက်ရှိစာရင်းများ ပျက်သွားပြီး Backup ဖိုင်ထဲက စာရင်းများဖြင့် အစားထိုးမည်ဖြစ်ပါသည်။)"
+    bot.send_message(message.chat.id, text, parse_mode="Markdown")
+
+# User ပို့လာသော document ဖိုင်ကို ဖမ်းယူမည့် နေရာ (Recover အတွက်)
+@bot.message_handler(content_types=['document'])
+@check_channel
+def handle_document(message):
+    if message.document.file_name == 'accounting.db':
+        try:
+            bot.send_message(message.chat.id, "⏳ Data ပြန်လည်သွင်းနေပါသည်...")
+            file_info = bot.get_file(message.document.file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+            
+            # လက်ရှိ Database ကို အသစ်နဲ့ အစားထိုးခြင်း
+            with open('accounting.db', 'wb') as new_file:
+                new_file.write(downloaded_file)
+                
+            bot.send_message(message.chat.id, "✅ စာရင်းဟောင်းများကို အောင်မြင်စွာ Recover ပြန်လုပ်ပြီးပါပြီ။", reply_markup=main_menu())
+        except Exception as e:
+            bot.send_message(message.chat.id, f"⚠️ မှားယွင်းမှုဖြစ်ပေါ်နေပါသည်: အဆင်မပြေပါ။")
+    else:
+        bot.send_message(message.chat.id, "⚠️ ကျေးဇူးပြု၍ `accounting.db` အမည်ရှိသော မှန်ကန်သည့် Backup ဖိုင်ကိုသာ ပေးပို့ပါ။")
+
+# ----------------- စာရင်းဖျက်ခြင်း နှင့် Reset လုပ်ခြင်း -----------------
 @bot.message_handler(func=lambda m: m.text == "❌ စာရင်းဖျက်မည်")
 @check_channel
 def delete_menu(message):
@@ -250,7 +252,6 @@ def process_delete(call):
     conn.close()
     bot.edit_message_text("✅ ရွေးချယ်ထားသော စာရင်းကို ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
 
-# ----------------- စာရင်းအသစ်ပြန်စရန် -----------------
 @bot.message_handler(func=lambda m: m.text == "🔄 စာရင်းအသစ်ပြန်စမည်")
 @check_channel
 def reset_confirm(message):
@@ -279,4 +280,4 @@ def handle_reset_choice(call):
 
 print("Bot runs successfully! Waiting for messages...")
 bot.infinity_polling()
-        
+    
