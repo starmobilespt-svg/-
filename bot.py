@@ -8,8 +8,8 @@ import os
 TOKEN = "8580240882:AAHJYpwlC5adLcdxXZIOa5XDL80Xj7Jvg9s"
 bot = telebot.TeleBot(TOKEN)
 
-# 📢 သင့်ရဲ့ Telegram Channel Username ကို ဤနေရာတွင် ထည့်ပါ (Bot သည် ထို Channel ၏ Admin ဖြစ်ရပါမည်)
-CHANNEL_USERNAME = "@your_channel_username"
+# 📢 သင့်ရဲ့ Telegram Channel ကို ထည့်သွင်းထားပါသည်
+CHANNEL_USERNAME = "@starmobile63956"
 
 def init_db():
     conn = sqlite3.connect('accounting.db')
@@ -37,7 +37,8 @@ def check_user_channel(bot_instance, user_id):
         if member.status in active_statuses:
             return True
         return False
-    except Exception:
+    except Exception as e:
+        print(f"Error checking channel membership: {e}")
         return False
 
 def check_channel(func):
@@ -49,7 +50,7 @@ def check_channel(func):
             markup.add(types.InlineKeyboardButton("🔄 ပြန်စစ်မည်", callback_data="check_subscription"))
             bot.send_message(
                 message.chat.id, 
-                "⚠️ **လုပ်ဆောင်ချက် မအောင်မြင်ပါ!**\n\nကျေးဇူးပြု၍ ကျွန်ုပ်တို့၏ Channel ကို အရင် Join ပေးပါ။ ပြီးမှ အောက်ပါ ခလုတ်ကို နှိပ်၍ စစ်ဆေးပါ။", 
+                "⚠️ **လုပ်ဆောင်ချက် မအောင်မြင်ပါ!**\n\nကျေးဇူးပြု၍ ကျွန်ုပ်တို့၏ Channel ကို အရင် Join ပေးပါ။ ပြီးမှ အောက်ပါ 'ပြန်စစ်မည်' ခလုတ်ကို နှိပ်၍ အသုံးပြုပါ။", 
                 reply_markup=markup,
                 parse_mode="Markdown"
             )
@@ -62,10 +63,9 @@ def verify_subscription(call):
     if check_user_channel(bot, call.from_user.id):
         bot.answer_callback_query(call.id, "✅ Channel Joinပြီးပါပြီ။ Bot ကို ဆက်လက်သုံးနိုင်ပါပြီ။")
         bot.edit_message_text(
-            "✅ ကျေးဇူးတင်ပါတယ်! Channel Join ပြီးဖြစ်သောကြောင့် Bot ကို အောင်မြင်စွာ အသုံးပြုနိုင်ပါပြီ။", 
+            "✅ ကျေးဇူးတင်ပါတယ်! Channel Join ပြီးဖြစ်သောကြောင့် Bot ကို အောင်မြင်စွာ အသုံးပြုနိုင်ပါပြီ။ \n\nစတင်ရန် /start ကို နှိပ်ပါ။", 
             call.message.chat.id, 
-            call.message.message_id, 
-            reply_markup=main_menu()
+            call.message.message_id
         )
     else:
         bot.answer_callback_query(call.id, "❌ သင် Channel မ join ရသေးပါ။ ကျေးဇူးပြု၍ အရင် Join ပေးပါ။", show_alert=True)
@@ -279,4 +279,4 @@ def handle_reset_choice(call):
 
 print("Bot runs successfully! Waiting for messages...")
 bot.infinity_polling()
-    
+        
