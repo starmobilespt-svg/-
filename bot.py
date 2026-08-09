@@ -20,7 +20,7 @@ def keep_alive():
     t.start()
 # -----------------------------------------------------------------
 
-TOKEN = "8580240882:AAHJYpwlC5adLcdxXZIOa5XDL80Xj7Jvg9s"
+TOKEN = "8580240882:AAFip5EPqMmkM33xQ6BUBCaIn_vWe8y-TSM"
 bot = telebot.TeleBot(TOKEN)
 
 def init_db():
