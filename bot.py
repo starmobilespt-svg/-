@@ -26,6 +26,7 @@ bot = telebot.TeleBot(TOKEN)
 def init_db():
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
+    # ငွေကြေးမှတ်တမ်း Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,30 +37,57 @@ def init_db():
             date TIMESTAMP DEFAULT (datetime('now', 'localtime'))
         )
     ''')
+    # ပစ္စည်း (Stock) မှတ်တမ်း Table အသစ်
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            item_name TEXT,
+            quantity INTEGER DEFAULT 0,
+            buy_price REAL DEFAULT 0,
+            sell_price REAL DEFAULT 0
+        )
+    ''')
     conn.commit()
     conn.close()
 
 init_db()
 
+# ----------------- Menus -----------------
 def main_menu():
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(types.KeyboardButton("➕ ဝင်ငွေမှတ်မည်"), types.KeyboardButton("➖ ထွက်ငွေမှတ်မည်"))
     markup.add(types.KeyboardButton("📅 ဒီနေ့စာရင်း"), types.KeyboardButton("🗓 ဒီလစာရင်း"))
-    markup.add(types.KeyboardButton("💰 စုစုပေါင်းလက်ကျန်"), types.KeyboardButton("❌ စာရင်းဖျက်မည်"))
+    markup.add(types.KeyboardButton("💰 စုစုပေါင်းလက်ကျန်"), types.KeyboardButton("📦 ပစ္စည်းစတော့ (Stock)"))
     markup.add(types.KeyboardButton("♻️ Recover လုပ်မည်"), types.KeyboardButton("💾 Backup ယူမည်"))
-    markup.add(types.KeyboardButton("🔄 စာရင်းအသစ်ပြန်စမည်"))
+    markup.add(types.KeyboardButton("❌ စာရင်းဖျက်မည်"), types.KeyboardButton("🔄 အသစ်ပြန်စမည်"))
+    return markup
+
+def stock_menu():
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    markup.add(types.KeyboardButton("🛒 ပစ္စည်းဝယ်မည်"), types.KeyboardButton("🛍 ပစ္စည်းရောင်းမည်"))
+    markup.add(types.KeyboardButton("📤 အငှားပေးမည်"), types.KeyboardButton("📥 အငှားပြန်အပ်မည်"))
+    markup.add(types.KeyboardButton("📊 Stock လက်ကျန်စာရင်း"), types.KeyboardButton("🔙 ပင်မမီနူးသို့"))
     return markup
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    text = "မင်္ဂလာပါ! စာရင်းကိုင် Bot မှ ကြိုဆိုပါတယ်။\nအောက်ပါ ခလုတ်များကို နှိပ်၍ အသုံးပြုနိုင်ပါသည်။"
+    text = "မင်္ဂလာပါ! စာရင်းကိုင်နှင့် Stock Bot မှ ကြိုဆိုပါတယ်။\nအောက်ပါ ခလုတ်များကို နှိပ်၍ အသုံးပြုနိုင်ပါသည်။"
     bot.send_message(message.chat.id, text, reply_markup=main_menu())
 
-# ----------------- စာရင်းမှတ်ခြင်း -----------------
+@bot.message_handler(func=lambda m: m.text == "🔙 ပင်မမီနူးသို့")
+def back_to_main(message):
+    bot.send_message(message.chat.id, "ပင်မမီနူးသို့ ပြန်ရောက်ပါပြီ။", reply_markup=main_menu())
+
+@bot.message_handler(func=lambda m: m.text == "📦 ပစ္စည်းစတော့ (Stock)")
+def show_stock_menu(message):
+    bot.send_message(message.chat.id, "📦 Stock စီမံခန့်ခွဲမှု စနစ်မှ ကြိုဆိုပါတယ်။", reply_markup=stock_menu())
+
+# ----------------- စာရင်းမှတ်ခြင်း (ငွေကြေး) -----------------
 @bot.message_handler(func=lambda m: m.text in ["➕ ဝင်ငွေမှတ်မည်", "➖ ထွက်ငွေမှတ်မည်"])
 def start_transaction(message):
     trans_type = 'income' if 'ဝင်ငွေ' in message.text else 'expense'
-    msg = bot.send_message(message.chat.id, "ပမာဏနှင့် အကြောင်းအရာကို ရိုက်ထည့်ပါ\n(ဥပမာ - 5000 လစာ သို့မဟုတ် 1500 မနက်စာ):")
+    msg = bot.send_message(message.chat.id, "ပမာဏနှင့် အကြောင်းအရာကို ရိုက်ထည့်ပါ\n(ဥပမာ - 5000 လစာ သို့မဟုတ် 1500 မနက်စာ):", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_transaction, trans_type)
 
 def process_transaction(message, trans_type):
@@ -81,7 +109,165 @@ def process_transaction(message, trans_type):
     except Exception:
         bot.send_message(message.chat.id, "⚠️ မှားယွင်းနေပါသည်။ ပမာဏကို အရင်ရိုက်ပါ (ဥပမာ- 2000 မုန့်ဖိုး)။", reply_markup=main_menu())
 
-# ----------------- အစီရင်ခံစာများ -----------------
+# ----------------- STOCK (ဝယ် / ရောင်း / ငှား) -----------------
+
+# ၁။ ဝယ်ခြင်း (Buy)
+@bot.message_handler(func=lambda m: m.text == "🛒 ပစ္စည်းဝယ်မည်")
+def ask_buy_stock(message):
+    msg = bot.send_message(
+        message.chat.id, 
+        "ပစ္စည်းအမည်၊ အရေအတွက်၊ ဝယ်ဈေး(တစ်ခုစာ)၊ ရောင်းဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ထည့်ပါ။\n\nဥပမာ: `ဖုန်း, 5, 100000, 150000`", 
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    bot.register_next_step_handler(msg, process_buy_stock)
+
+def process_buy_stock(message):
+    try:
+        parts = [p.strip() for p in message.text.split(',')]
+        name = parts[0]
+        qty = int(parts[1])
+        buy_price = float(parts[2])
+        sell_price = float(parts[3])
+        total_expense = qty * buy_price
+        user_id = message.from_user.id
+        
+        conn = sqlite3.connect('accounting.db')
+        cursor = conn.cursor()
+        
+        # Check if item exists
+        cursor.execute("SELECT id, quantity FROM inventory WHERE user_id=? AND item_name=?", (user_id, name))
+        row = cursor.fetchone()
+        
+        if row:
+            new_qty = row[1] + qty
+            cursor.execute("UPDATE inventory SET quantity=?, buy_price=?, sell_price=? WHERE id=?", (new_qty, buy_price, sell_price, row[0]))
+        else:
+            new_qty = qty
+            cursor.execute("INSERT INTO inventory (user_id, item_name, quantity, buy_price, sell_price) VALUES (?, ?, ?, ?, ?)", 
+                           (user_id, name, qty, buy_price, sell_price))
+            
+        # Add to expenses
+        cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)",
+                       (user_id, total_expense, f"{name} ({qty} ခု) ဝယ်ယူခြင်း"))
+        
+        conn.commit()
+        conn.close()
+        
+        bot.send_message(message.chat.id, f"✅ ဝယ်ယူမှုမှတ်တမ်း တင်ပြီးပါပြီ။\n\nပစ္စည်း: {name}\nအဝယ်အရေအတွက်: {qty}\nစုစုပေါင်းကျသင့်ငွေ: {total_expense:,.0f} ကျပ် (ထွက်ငွေထဲသို့ ထည့်သွင်းပြီး)\n\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
+    except Exception as e:
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ ကော်မာ (,) ခြား၍ သေချာ ပြန်ရိုက်ကြည့်ပါ။", reply_markup=stock_menu())
+
+# ၂။ ရောင်းခြင်း (Sell)
+@bot.message_handler(func=lambda m: m.text == "🛍 ပစ္စည်းရောင်းမည်")
+def ask_sell_stock(message):
+    msg = bot.send_message(message.chat.id, "ရောင်းမည့် ပစ္စည်းအမည် နှင့် အရေအတွက်ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\n\nဥပမာ: `ဖုန်း, 2`", parse_mode="Markdown", reply_markup=types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, process_sell_stock)
+
+def process_sell_stock(message):
+    try:
+        parts = [p.strip() for p in message.text.split(',')]
+        name = parts[0]
+        qty = int(parts[1])
+        user_id = message.from_user.id
+        
+        conn = sqlite3.connect('accounting.db')
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT id, quantity, sell_price FROM inventory WHERE user_id=? AND item_name=?", (user_id, name))
+        row = cursor.fetchone()
+        
+        if not row or row[1] < qty:
+            conn.close()
+            bot.send_message(message.chat.id, f"⚠️ '{name}' အတွက် Stock အလုံအလောက်မရှိပါ။", reply_markup=stock_menu())
+            return
+            
+        new_qty = row[1] - qty
+        sell_price = row[2]
+        total_income = qty * sell_price
+        
+        # Update stock
+        cursor.execute("UPDATE inventory SET quantity=? WHERE id=?", (new_qty, row[0]))
+        # Add to income
+        cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'income', ?, ?)",
+                       (user_id, total_income, f"{name} ({qty} ခု) ရောင်းရငွေ"))
+                       
+        conn.commit()
+        conn.close()
+        
+        bot.send_message(message.chat.id, f"✅ ရောင်းချမှု အောင်မြင်ပါသည်။\n\nပစ္စည်း: {name}\nအရေအတွက်: {qty}\nစုစုပေါင်းရငွေ: {total_income:,.0f} ကျပ် (ဝင်ငွေထဲသို့ ထည့်သွင်းပြီး)\n\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
+    except Exception:
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
+
+# ၃။ အငှားပေး (Rent Out)
+@bot.message_handler(func=lambda m: m.text == "📤 အငှားပေးမည်")
+def ask_rent_out(message):
+    msg = bot.send_message(message.chat.id, "အငှားပေးမည့် ပစ္စည်းအမည် နှင့် အရေအတွက်ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\n\nဥပမာ: `ဖုန်း, 1`", parse_mode="Markdown", reply_markup=types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, process_rent_stock, "out")
+
+# ၄။ အငှားပြန်အပ် (Rent In)
+@bot.message_handler(func=lambda m: m.text == "📥 အငှားပြန်အပ်မည်")
+def ask_rent_in(message):
+    msg = bot.send_message(message.chat.id, "ပြန်အပ်မည့် ပစ္စည်းအမည် နှင့် အရေအတွက်ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\n\nဥပမာ: `ဖုန်း, 1`", parse_mode="Markdown", reply_markup=types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, process_rent_stock, "in")
+
+def process_rent_stock(message, action):
+    try:
+        parts = [p.strip() for p in message.text.split(',')]
+        name = parts[0]
+        qty = int(parts[1])
+        user_id = message.from_user.id
+        
+        conn = sqlite3.connect('accounting.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, quantity FROM inventory WHERE user_id=? AND item_name=?", (user_id, name))
+        row = cursor.fetchone()
+        
+        if not row:
+            bot.send_message(message.chat.id, "⚠️ ထိုပစ္စည်းစာရင်းတွင်မရှိပါ။", reply_markup=stock_menu())
+            return
+            
+        current_qty = row[1]
+        
+        if action == "out":
+            if current_qty < qty:
+                bot.send_message(message.chat.id, "⚠️ Stock အလုံအလောက်မရှိပါ။", reply_markup=stock_menu())
+                return
+            new_qty = current_qty - qty
+            msg_text = "📤 အငှားပေးခြင်း"
+        else:
+            new_qty = current_qty + qty
+            msg_text = "📥 အငှားပြန်လည်လက်ခံခြင်း"
+            
+        cursor.execute("UPDATE inventory SET quantity=? WHERE id=?", (new_qty, row[0]))
+        conn.commit()
+        conn.close()
+        
+        bot.send_message(message.chat.id, f"✅ {msg_text} အောင်မြင်ပါသည်။\n\nပစ္စည်း: {name}\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
+    except Exception:
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
+
+# ၅။ Stock စာရင်းကြည့်ရန်
+@bot.message_handler(func=lambda m: m.text == "📊 Stock လက်ကျန်စာရင်း")
+def check_stock(message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT item_name, quantity, buy_price, sell_price FROM inventory WHERE user_id=?", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        bot.send_message(message.chat.id, "📦 ပစ္စည်း (Stock) စာရင်း အလွတ်ဖြစ်နေပါသည်။")
+        return
+        
+    text = "📊 လက်ရှိ Stock စာရင်း\n====================\n"
+    for r in rows:
+        text += f"▪️ {r[0]}\n   - အရေအတွက်: {r[1]} ခု\n   - ဝယ်ဈေး: {r[2]:,.0f} Ks\n   - ရောင်းဈေး: {r[3]:,.0f} Ks\n\n"
+        
+    bot.send_message(message.chat.id, text)
+
+# ----------------- Reports (အစီရင်ခံစာများ) -----------------
 @bot.message_handler(func=lambda m: m.text == "📅 ဒီနေ့စာရင်း")
 def show_today_report(message):
     user_id = message.from_user.id
@@ -145,12 +331,12 @@ def check_total_balance(message):
     text = f"🏦 စုစုပေါင်း စာရင်းချုပ်\n\n🟢 ဝင်ငွေ: {total_income:,.0f} ကျပ်\n🔴 ထွက်ငွေ: {total_expense:,.0f} ကျပ်\n---------------------------\n💰 လက်ရှိကျန်ငွေ: {(total_income - total_expense):,.0f} ကျပ်"
     bot.send_message(message.chat.id, text)
 
-# ----------------- Backup နှင့် Recover လုပ်ဆောင်ချက်များ -----------------
+# ----------------- Backup နှင့် Recover -----------------
 @bot.message_handler(func=lambda m: m.text == "💾 Backup ယူမည်")
 def backup_db(message):
     if os.path.exists('accounting.db'):
         with open('accounting.db', 'rb') as f:
-            bot.send_document(message.chat.id, f, caption="💾 Database Backup ဖိုင် ရပါပြီ။\n(ဤဖိုင်ကို သိမ်းထားပါက စာရင်းများ ဘယ်တော့မှ မပျောက်တော့ပါ။)")
+            bot.send_document(message.chat.id, f, caption="💾 Database Backup ဖိုင် ရပါပြီ။\n(စာရင်းများနှင့် Stock မှတ်တမ်းများ အားလုံးပါဝင်ပါသည်။)")
     else:
         bot.send_message(message.chat.id, "Database ဖိုင် မတွေ့ပါ။")
 
@@ -177,11 +363,15 @@ def process_recover(message):
             with open('accounting.db', 'wb') as new_file:
                 new_file.write(downloaded_file)
                 
+            # သတိပြုရန်: Backup အဟောင်း (Stock မပါသောဖိုင်) ကို Restore လုပ်လျှင်
+            # Error မတက်စေရန် Table အသစ်များကို အလိုအလျောက် Update လုပ်ပေးမည်ဖြစ်သည်။
+            init_db() 
+                
             bot.send_message(message.chat.id, "✅ Data အဟောင်းများကို အောင်မြင်စွာ ပြန်လည်ထည့်သွင်း (Recover) ပြီးပါပြီ။", reply_markup=main_menu())
         except Exception as e:
             bot.send_message(message.chat.id, "⚠️ ဖိုင်ထည့်သွင်းရာတွင် အမှားအယွင်းရှိနေပါသည်။", reply_markup=main_menu())
     else:
-        bot.send_message(message.chat.id, "⚠️ ဖိုင် မတွေ့ရပါ။ လုပ်ဆောင်ချက်ကို ရပ်ဆိုင်းလိုက်ပါသည်။", reply_markup=main_menu())
+        bot.send_message(message.chat.id, "⚠️ ဖိုင် မတွေ့ရပါ။", reply_markup=main_menu())
 
 # ----------------- စာရင်းဖျက်ခြင်း နှင့် အသစ်ပြန်စခြင်း -----------------
 @bot.message_handler(func=lambda m: m.text == "❌ စာရင်းဖျက်မည်")
@@ -205,7 +395,7 @@ def delete_menu(message):
         markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"del_{t_id}"))
     
     markup.add(types.InlineKeyboardButton("ပယ်ဖျက်မည်", callback_data="cancel_reset"))
-    bot.send_message(message.chat.id, "ဖျက်လိုသော စာရင်းကို ရွေးချယ်ပါ (နောက်ဆုံးသွင်းထားသော ၅ ခု) -", reply_markup=markup)
+    bot.send_message(message.chat.id, "ဖျက်လိုသော ငွေကြေးစာရင်းကို ရွေးချယ်ပါ (နောက်ဆုံးသွင်းထားသော ၅ ခု) -", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("del_"))
 def process_delete(call):
@@ -217,15 +407,15 @@ def process_delete(call):
     conn.close()
     bot.edit_message_text("✅ ရွေးချယ်ထားသော စာရင်းကို ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
 
-@bot.message_handler(func=lambda m: m.text == "🔄 စာရင်းအသစ်ပြန်စမည်")
+@bot.message_handler(func=lambda m: m.text == "🔄 အသစ်ပြန်စမည်")
 def reset_confirm(message):
     markup = types.InlineKeyboardMarkup()
-    btn_yes = types.InlineKeyboardButton("✅ ဟုတ်ကဲ့၊ အကုန်ဖျက်မည်", callback_data="confirm_reset")
+    btn_yes = types.InlineKeyboardButton("✅ အားလုံးဖျက်မည်", callback_data="confirm_reset")
     btn_no = types.InlineKeyboardButton("❌ မဖျက်တော့ပါ", callback_data="cancel_reset")
     markup.add(btn_yes, btn_no)
     bot.send_message(
         message.chat.id, 
-        "⚠️ **သတိပေးချက်:**\nယခင် မှတ်ထားသော စာရင်းများအားလုံး ပျက်သွားမည်ဖြစ်သည်။ စာရင်းအသစ်မှ ပြန်စရန် သေချာပါသလား?", 
+        "⚠️ **သတိပေးချက်:**\nငွေကြေးစာရင်းများနှင့် ပစ္စည်း (Stock) မှတ်တမ်းများ အားလုံး ပျက်သွားမည်ဖြစ်သည်။ သေချာပါသလား?", 
         reply_markup=markup,
         parse_mode="Markdown"
     )
@@ -236,14 +426,14 @@ def handle_reset_choice(call):
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
         cursor.execute("DELETE FROM transactions WHERE user_id=?", (call.from_user.id,))
+        cursor.execute("DELETE FROM inventory WHERE user_id=?", (call.from_user.id,))
         conn.commit()
         conn.close()
-        bot.edit_message_text("✅ စာရင်းများအားလုံးကို အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ။ စာရင်းအသစ် စတင် မှတ်နိုင်ပါပြီ။", call.message.chat.id, call.message.message_id)
+        bot.edit_message_text("✅ မှတ်တမ်းအားလုံးကို အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
     elif call.data == "cancel_reset":
         bot.edit_message_text("❌ လုပ်ဆောင်ချက်ကို ပယ်ဖျက်လိုက်ပါသည်။", call.message.chat.id, call.message.message_id)
 
 if __name__ == '__main__':
-    keep_alive() # Web server စတင်ရန်
-    print("Bot runs successfully! Waiting for messages...")
+    keep_alive()
+    print("Bot is running with Stock Management features...")
     bot.infinity_polling()
-    
