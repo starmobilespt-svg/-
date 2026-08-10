@@ -81,7 +81,6 @@ def get_available_stock_html(user_id, condition="quantity > 0"):
         
     text = "📦 <b>ရွေးချယ်နိုင်သော Stock များ:</b>\n(အမည်ကို နှိပ်၍ Copy ကူးပါ)\n"
     for r in rows:
-        # <code> tag အသုံးပြုထားသဖြင့် ဖုန်းတွင်နှိပ်လိုက်လျှင် copy ကူးသွားမည်
         text += f"▪️ <code>{r[0]}</code> - (လက်ကျန်: {r[1]} ခု)\n"
     text += "\n"
     return text
@@ -99,8 +98,10 @@ def main_menu():
 def stock_menu():
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(types.KeyboardButton("🛒 ဝယ်မည် (Buy)"), types.KeyboardButton("🛍 ရောင်းမည် (Sell)"))
-    markup.add(types.KeyboardButton("🔄 အငှားကဏ္ဍ (Rentals)"), types.KeyboardButton("🗑 ပျက်စီး/အလျော့ပြ"))
-    markup.add(types.KeyboardButton("📊 Stock တန်ဖိုး/လက်ကျန်"), types.KeyboardButton("🔙 ပင်မမီနူးသို့"))
+    # Stock အဟောင်းသွင်းရန် ခလုတ်အသစ် ထည့်ပေးထားသည်
+    markup.add(types.KeyboardButton("📦 Stock အဟောင်းသွင်းမည်"), types.KeyboardButton("🗑 ပျက်စီး/အလျော့ပြ"))
+    markup.add(types.KeyboardButton("🔄 အငှားကဏ္ဍ (Rentals)"), types.KeyboardButton("📊 Stock တန်ဖိုး/လက်ကျန်"))
+    markup.add(types.KeyboardButton("🔙 ပင်မမီနူးသို့"))
     return markup
 
 def rent_menu():
@@ -142,7 +143,7 @@ def process_transaction(message, trans_type):
     try:
         parts = message.text.split(maxsplit=1)
         amount = float(parts[0])
-        note = parts[1] if len(parts) > 1 else "အကြောင်းအရာမရှိ"
+        note = parts[1] if len(parts) > 1 else "အခြား" # Default note 
         
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
@@ -152,12 +153,12 @@ def process_transaction(message, trans_type):
         conn.close()
         
         type_str = "➕ ဝင်ငွေ" if trans_type == 'income' else "➖ ထွက်ငွေ"
-        res = f"✅ စာရင်းမှတ်ပြီးပါပြီ!\n\nအမျိုးအစား: {type_str}\nပမာဏ: {amount:,.0f} ကျပ်\nအကြောင်းအရာ: {note}"
+        res = f"✅ စာရင်းမှတ်ပြီးပါပြီ!\n\nအမျိုးအစား: {type_str}\nပမာဏ: {amount:,.0f} Ks\nအကြောင်းအရာ: {note}"
         bot.send_message(message.chat.id, res, reply_markup=main_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ မှားယွင်းနေပါသည်။ ပမာဏကို အရင်ရိုက်ပါ (ဥပမာ- 2000 မုန့်ဖိုး)။", reply_markup=main_menu())
 
-# ----------------- STOCK (ဝယ် / ရောင်း / ပျက်စီး) -----------------
+# ----------------- STOCK (ဝယ် / ရောင်း / အဟောင်းသွင်း / ပျက်စီး) -----------------
 
 @bot.message_handler(func=lambda m: m.text == "🛒 ဝယ်မည် (Buy)")
 def ask_buy_stock(message):
@@ -188,8 +189,9 @@ def process_buy_stock(message):
             cursor.execute("INSERT INTO inventory (user_id, item_name, quantity, buy_price) VALUES (?, ?, ?, ?)", 
                            (user_id, name, qty, buy_price))
             
+        # Grouping အဆင်ပြေစေရန် အရေအတွက် (X ခု) ဆိုသည်ကို Note မှ ဖြုတ်ထားပါသည်
         cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)",
-                       (user_id, total_expense, f"{name} ({qty} ခု) ဝယ်ယူခြင်း"))
+                       (user_id, total_expense, f"{name} ဝယ်ယူခြင်း"))
         conn.commit()
         conn.close()
         
@@ -197,6 +199,48 @@ def process_buy_stock(message):
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
+# --- [Stock အဟောင်းသွင်းမည် - ငွေကြေးစာရင်း မထိခိုက်ပါ] ---
+@bot.message_handler(func=lambda m: m.text == "📦 Stock အဟောင်းသွင်းမည်")
+def ask_old_stock(message):
+    stock_list = get_available_stock_html(message.from_user.id, "all")
+    msg = bot.send_message(
+        message.chat.id, 
+        stock_list + "ယခင်ရှိပြီးသား Stock အဟောင်းများ ထည့်သွင်းရန်\n**(ငွေကြေးစာရင်းမှ ထွက်ငွေအဖြစ် နှုတ်မည်မဟုတ်ပါ)**\n\nပစ္စည်းအမည်၊ အရေအတွက် နှင့် ဝယ်ဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ထည့်ပါ။\n\nဥပမာ: <code>ဖုန်း, 5, 100000</code>", 
+        parse_mode="HTML", 
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    bot.register_next_step_handler(msg, process_old_stock)
+
+def process_old_stock(message):
+    try:
+        parts = [p.strip() for p in message.text.split(',')]
+        name = parts[0]
+        qty = int(parts[1])
+        buy_price = float(parts[2])
+        user_id = message.from_user.id
+        
+        conn = sqlite3.connect('accounting.db')
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT id, quantity FROM inventory WHERE user_id=? AND item_name=?", (user_id, name))
+        row = cursor.fetchone()
+        
+        if row:
+            new_qty = row[1] + qty
+            cursor.execute("UPDATE inventory SET quantity=?, buy_price=? WHERE id=?", (new_qty, buy_price, row[0]))
+        else:
+            new_qty = qty
+            cursor.execute("INSERT INTO inventory (user_id, item_name, quantity, buy_price) VALUES (?, ?, ?, ?)", 
+                           (user_id, name, qty, buy_price))
+            
+        # ငွေကြေးစာရင်း (transactions table) ထဲသို့ ထည့်သွင်းခြင်း မပြုပါ။
+        conn.commit()
+        conn.close()
+        
+        bot.send_message(message.chat.id, f"✅ Stock အဟောင်း ထည့်သွင်းခြင်း အောင်မြင်ပါသည်။\n\nပစ္စည်း: {name}\nအရေအတွက်: +{qty}\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု\n(ထွက်ငွေစာရင်းထဲမှ လျှော့ချမည် မဟုတ်ပါ။)", reply_markup=stock_menu())
+    except Exception:
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
+# -----------------------------------------------------------
 
 @bot.message_handler(func=lambda m: m.text == "🛍 ရောင်းမည် (Sell)")
 def ask_sell_stock(message):
@@ -227,13 +271,14 @@ def process_sell_stock(message):
         total_income = qty * sell_price
         
         cursor.execute("UPDATE inventory SET quantity=?, sell_price=? WHERE id=?", (new_qty, sell_price, row[0]))
+        # Grouping အဆင်ပြေစေရန် Note ပြင်ထားသည်
         cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'income', ?, ?)",
-                       (user_id, total_income, f"{name} ({qty} ခု) ရောင်းရငွေ"))
+                       (user_id, total_income, f"{name} ရောင်းရငွေ"))
                        
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ ရောင်းချမှု အောင်မြင်ပါသည်။\n\nပစ္စည်း: {name}\nစုစုပေါင်းရငွေ: {total_income:,.0f} Ks\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
+        bot.send_message(message.chat.id, f"✅ ရောင်းချမှု အောင်မြင်ပါသည်။\n\nပစ္စည်း: {name} ({qty} ခု)\nစုစုပေါင်းရငွေ: {total_income:,.0f} Ks\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
@@ -245,7 +290,6 @@ def ask_damage_stock(message):
     bot.register_next_step_handler(msg, process_damage_stock)
 
 def process_damage_stock(message):
-    # Same as before
     try:
         parts = [p.strip() for p in message.text.split(',')]
         name = parts[0]
@@ -269,7 +313,6 @@ def process_damage_stock(message):
 
 
 # ----------------- RENTAL (အငှားကဏ္ဍ) -----------------
-
 @bot.message_handler(func=lambda m: m.text == "📥 အငှားယူမည် (Borrow)")
 def ask_rent_in(message):
     stock_list = get_available_stock_html(message.from_user.id, "all")
@@ -295,7 +338,6 @@ def ask_return_lend(message):
     bot.register_next_step_handler(msg, process_renting, "return_lend")
 
 def process_renting(message, action):
-    # Same as before ...
     try:
         parts = [p.strip() for p in message.text.split(',')]
         name = parts[0]
@@ -309,7 +351,7 @@ def process_renting(message, action):
         row = cursor.fetchone()
         
         if not row and action in ["return_borrow", "lend", "return_lend"]:
-            bot.send_message(message.chat.id, "⚠️ ထိုပစ္စည်းစာရင်းတွင်မရှိပါ။ (အရင်ဆုံး Database တွင် ရှိရပါမည်)", reply_markup=rent_menu())
+            bot.send_message(message.chat.id, "⚠️ ထိုပစ္စည်းစာရင်းတွင်မရှိပါ။", reply_markup=rent_menu())
             conn.close()
             return
 
@@ -331,7 +373,7 @@ def process_renting(message, action):
                 return
             cursor.execute("UPDATE inventory SET rented_in=? WHERE id=?", (r_in - qty, item_id))
             if fee > 0:
-                cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, fee, f"{name} အငှားပြန်အပ်ခပေးငွေ"))
+                cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, fee, f"{name} ငှားခပေးငွေ"))
             bot.send_message(message.chat.id, f"📤 '{name}' ({qty} ခု) အငှားပြန်အပ်ပြီးပါပြီ။\n{'🔴 ငှားခပေးငွေ (ထွက်ငွေ): ' + str(fee) + ' Ks' if fee > 0 else ''}", reply_markup=rent_menu())
         elif action == "lend":
             if current_qty < qty:
@@ -345,13 +387,13 @@ def process_renting(message, action):
                 return
             cursor.execute("UPDATE inventory SET quantity=?, rented_out=? WHERE id=?", (current_qty + qty, r_out - qty, item_id))
             if fee > 0:
-                cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'income', ?, ?)", (user_id, fee, f"{name} အငှားချထားရာမှ ရငွေ"))
+                cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'income', ?, ?)", (user_id, fee, f"{name} ငှားခရငွေ"))
             bot.send_message(message.chat.id, f"📥 '{name}' ({qty} ခု) အငှားပြန်လည်ရရှိပါပြီ။\n{'🟢 ငှားခရငွေ (ဝင်ငွေ): ' + str(fee) + ' Ks' if fee > 0 else ''}", reply_markup=rent_menu())
 
         conn.commit()
         conn.close()
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ ကော်မာ (,) ခြား၍ သေချာရေးပါ။", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=rent_menu())
 
 
 # ----------------- 📊 Stock Valuation (တန်ဖိုးတွက်ချက်ခြင်း) -----------------
@@ -418,43 +460,54 @@ def show_today_report(message):
     bot.send_message(message.chat.id, text)
 
 
-# --- [အသစ်ပြင်ဆင်ထားသော လချုပ်စာရင်း] ---
+# --- [အသစ်ပြင်ဆင်ထားသော လချုပ်စာရင်း (Grouped - ပေါင်း၍ပြခြင်း)] ---
 @bot.message_handler(func=lambda m: m.text == "🗓 ဒီလစာရင်း")
 def show_month_report(message):
     user_id = message.from_user.id
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
     
-    # ဝင်ငွေ ထွက်ငွေ စုစုပေါင်း တွက်ချက်ခြင်း
+    # ဝင်ငွေ Grouping
+    cursor.execute("SELECT note, SUM(amount) FROM transactions WHERE user_id=? AND type='income' AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') GROUP BY note ORDER BY SUM(amount) DESC", (user_id,))
+    incomes = cursor.fetchall()
+    
+    # ထွက်ငွေ Grouping
+    cursor.execute("SELECT note, SUM(amount) FROM transactions WHERE user_id=? AND type='expense' AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') GROUP BY note ORDER BY SUM(amount) DESC", (user_id,))
+    expenses = cursor.fetchall()
+    
+    # Total
     cursor.execute("SELECT SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime')", (user_id,))
     total_inc, total_exp = cursor.fetchone()
     
-    # ဒီလအတွင်းရှိ စာရင်းအားလုံးကို အသေးစိတ် ဆွဲထုတ်ခြင်း
-    cursor.execute("SELECT type, amount, note, strftime('%d-%m', date) FROM transactions WHERE user_id=? AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') ORDER BY date ASC", (user_id,))
-    rows = cursor.fetchall()
     conn.close()
     
     total_inc = total_inc or 0.0
     total_exp = total_exp or 0.0
     
-    text = "🗓 <b>ဒီလ ဘဏ္ဍာရေး အစီရင်ခံစာ</b>\n---------------------------\n"
+    text = "🗓 <b>ဒီလ ဘဏ္ဍာရေး အစီရင်ခံစာ (အကျဉ်းချုပ်)</b>\n=========================\n\n"
     
-    if rows:
-        text += "📝 <b>အသေးစိတ် မှတ်တမ်းများ:</b>\n"
-        for row in rows:
-            t_type, amount, note, date_str = row
-            symbol = "🟢 +" if t_type == 'income' else "🔴 -"
-            text += f"[{date_str}] {symbol} {amount:,.0f} Ks ({note})\n"
-    else:
-        text += "<i>ဒီလအတွက် မှတ်တမ်း မရှိသေးပါ။</i>\n"
+    if incomes:
+        text += "🟢 <b>ဝင်ငွေ ခေါင်းစဉ်များ:</b>\n"
+        for note, amt in incomes:
+            text += f"▪️ {note}: {amt:,.0f} Ks\n"
+        text += "\n"
         
-    text += "---------------------------\n"
+    if expenses:
+        text += "🔴 <b>ထွက်ငွေ ခေါင်းစဉ်များ:</b>\n"
+        for note, amt in expenses:
+            text += f"▪️ {note}: {amt:,.0f} Ks\n"
+        text += "\n"
+        
+    if not incomes and not expenses:
+        text += "<i>ဒီလအတွက် မှတ်တမ်း မရှိသေးပါ။</i>\n\n"
+        
+    text += "=========================\n"
     text += f"🟢 <b>ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n"
     text += f"🔴 <b>ထွက်ငွေစုစုပေါင်း:</b> {total_exp:,.0f} Ks\n"
-    text += f"💰 <b>ဒီလ ပိုငွေ:</b> {(total_inc - total_exp):,.0f} Ks"
+    text += f"💰 <b>ဒီလ ပိုငွေ (Net):</b> {(total_inc - total_exp):,.0f} Ks"
     
-    # Telegram Message Length Limit (4096) ကျော်သွားပါက ဖြတ်ထုတ်ပြရန်
     bot.send_message(message.chat.id, text[:4096], parse_mode="HTML")
+# -----------------------------------------------------------------
 
 @bot.message_handler(func=lambda m: m.text == "💰 စုစုပေါင်းလက်ကျန်")
 def check_total_balance(message):
@@ -559,5 +612,5 @@ def handle_reset_choice(call):
 
 if __name__ == '__main__':
     keep_alive()
-    print("Bot is running with Touch-To-Copy and Detailed Monthly Report...")
+    print("Bot is running with Grouped Reports and Old Stock Entry...")
     bot.infinity_polling()
