@@ -46,7 +46,6 @@ def init_db():
             sell_price REAL DEFAULT 0
         )
     ''')
-    # Stock အမှားပြင်ဆင်ရန်အတွက် Log Table အသစ်
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS stock_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,6 +100,16 @@ def get_available_stock_html(user_id, condition="quantity > 0"):
         text += f"▪️ <code>{r[0]}</code> - (လက်ကျန်: {r[1]} ခု)\n"
     text += "\n"
     return text
+
+def get_total_stock_value(user_id):
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT quantity, rented_out, buy_price FROM inventory WHERE user_id=?", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    # ကိုယ်ပိုင် Stock တန်ဖိုး (လက်ရှိ + အငှားပေးထားသော)
+    return sum((qty + r_out) * price for qty, r_out, price in rows)
 
 # ----------------- Menus -----------------
 def main_menu():
@@ -179,7 +188,7 @@ def process_transaction(message, trans_type):
 @bot.message_handler(func=lambda m: m.text == "🛒 ဝယ်မည် (Buy)")
 def ask_buy_stock(message):
     stock_list = get_available_stock_html(message.from_user.id, "all")
-    text = stock_list + "ဝယ်ယူမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ဝယ်ဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ထည့်ပါ။\n(ပို့ဆောင်ခ / Deli ခ ရှိပါက အဆုံးတွင် ထည့်သွင်းနိုင်ပါသည်။ မရှိပါက ထည့်ရန်မလိုပါ။)\n\nဥပမာ: <code>ဖုန်း, 5, 100000, 2000</code>\n(သို့မဟုတ်) <code>ဖုန်း, 5, 100000</code>"
+    text = stock_list + "ဝယ်ယူမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ဝယ်ဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ထည့်ပါ။\n(ပို့ဆောင်ခ / Deli ခ ရှိပါက အဆုံးတွင် ထည့်သွင်းနိုင်ပါသည်။)\n\nဥပမာ: <code>ဖုန်း, 5, 100000, 2000</code>\n(သို့မဟုတ်) <code>ဖုန်း, 5, 100000</code>"
     msg = bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_buy_stock)
 
@@ -271,7 +280,7 @@ def process_old_stock(message):
 @bot.message_handler(func=lambda m: m.text == "🛍 ရောင်းမည် (Sell)")
 def ask_sell_stock(message):
     stock_list = get_available_stock_html(message.from_user.id, "quantity > 0")
-    text = stock_list + "ရောင်းမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ရောင်းဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\n(ပို့ဆောင်ခ / Deli ခ ရှိပါက အဆုံးတွင် ထည့်သွင်းနိုင်ပါသည်။ မရှိပါက ထည့်ရန်မလိုပါ။)\n\nဥပမာ: <code>ဖုန်း, 2, 150000, 3000</code>\n(သို့မဟုတ်) <code>ဖုန်း, 2, 150000</code>"
+    text = stock_list + "ရောင်းမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ရောင်းဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\n(ပို့ဆောင်ခ / Deli ခ ရှိပါက အဆုံးတွင် ထည့်သွင်းနိုင်ပါသည်။)\n\nဥပမာ: <code>ဖုန်း, 2, 150000, 3000</code>\n(သို့မဟုတ်) <code>ဖုန်း, 2, 150000</code>"
     msg = bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_sell_stock)
 
@@ -423,7 +432,6 @@ def process_renting(message, action):
         trans_id = None
         deli_trans_id = None
         
-        # Deli Fee အရင်သွင်းမည် (ရှိလျှင်)
         if deli_fee > 0:
             deli_note = f"{name} အငှားပို့ဆောင်ခ"
             cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, deli_fee, deli_note))
@@ -514,7 +522,7 @@ def undo_stock_menu(message):
         markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"undostock_{t_id}"))
     
     markup.add(types.InlineKeyboardButton("ပယ်ဖျက်မည်", callback_data="cancel_reset"))
-    bot.send_message(message.chat.id, "ဖျက်လိုသော Stock လုပ်ဆောင်ချက်ကို ရွေးချယ်ပါ (နောက်ဆုံး ၅ ခု) -\n(မှတ်ချက် - ဝယ်/ရောင်း/ငှားခ ငွေကြေးစာရင်းများ နှင့် ပို့ဆောင်ခ(Deliခ) များပါ အလိုအလျောက် ပယ်ဖျက်ပေးမည်)", reply_markup=markup)
+    bot.send_message(message.chat.id, "ဖျက်လိုသော Stock လုပ်ဆောင်ချက်ကို ရွေးချယ်ပါ (နောက်ဆုံး ၅ ခု) -\n(မှတ်ချက် - ဝယ်/ရောင်း/ငှားခ ငွေကြေးစာရင်းများ နှင့် ပို့ဆောင်ခများပါ အလိုအလျောက် ပယ်ဖျက်ပေးမည်)", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("undostock_"))
 def process_stock_undo(call):
@@ -535,29 +543,17 @@ def process_stock_undo(call):
             inv_id, current_qty, r_in, r_out = inv
             new_qty, new_r_in, new_r_out = current_qty, r_in, r_out
             
-            # Revert logic
-            if a_type in ['buy', 'old_stock']:
-                new_qty -= qty
-            elif a_type in ['sell', 'damage']:
-                new_qty += qty
-            elif a_type == 'borrow':
-                new_r_in -= qty
-            elif a_type == 'return_borrow':
-                new_r_in += qty
-            elif a_type == 'lend':
-                new_qty += qty
-                new_r_out -= qty
-            elif a_type == 'return_lend':
-                new_qty -= qty
-                new_r_out += qty
+            if a_type in ['buy', 'old_stock']: new_qty -= qty
+            elif a_type in ['sell', 'damage']: new_qty += qty
+            elif a_type == 'borrow': new_r_in -= qty
+            elif a_type == 'return_borrow': new_r_in += qty
+            elif a_type == 'lend': new_qty += qty; new_r_out -= qty
+            elif a_type == 'return_lend': new_qty -= qty; new_r_out += qty
                 
             cursor.execute("UPDATE inventory SET quantity=?, rented_in=?, rented_out=? WHERE id=?", (new_qty, new_r_in, new_r_out, inv_id))
         
-        # Financial Transaction များပါ ဖျက်မည် (Item Price)
         if trans_id:
             cursor.execute("DELETE FROM transactions WHERE id=?", (trans_id,))
-            
-        # Financial Transaction များပါ ဖျက်မည် (Deli Fee)
         if deli_trans_id:
             cursor.execute("DELETE FROM transactions WHERE id=?", (deli_trans_id,))
             
@@ -631,7 +627,7 @@ def show_today_report(message):
     text += f"---------------------------\n🟢 ဝင်ငွေ: {total_inc:,.0f} Ks\n🔴 ထွက်ငွေ: {total_exp:,.0f} Ks\n⚖️ လက်ကျန်: {(total_inc - total_exp):,.0f} Ks"
     bot.send_message(message.chat.id, text)
 
-
+# --- [လချုပ်စာရင်းတွင် Stock တန်ဖိုးပါ ထည့်သွင်းပြသခြင်း] ---
 @bot.message_handler(func=lambda m: m.text == "🗓 ဒီလစာရင်း")
 def show_month_report(message):
     user_id = message.from_user.id
@@ -650,6 +646,8 @@ def show_month_report(message):
     
     total_inc = total_inc or 0.0
     total_exp = total_exp or 0.0
+    current_cash = total_inc - total_exp
+    total_stock_val = get_total_stock_value(user_id)
     
     text = "🗓 <b>ဒီလ ဘဏ္ဍာရေး အစီရင်ခံစာ (အကျဉ်းချုပ်)</b>\n=========================\n\n"
     
@@ -666,15 +664,18 @@ def show_month_report(message):
         text += "\n"
         
     if not incomes and not expenses:
-        text += "<i>ဒီလအတွက် မှတ်တမ်း မရှိသေးပါ။</i>\n\n"
+        text += "<i>ဒီလအတွက် ငွေကြေးမှတ်တမ်း မရှိသေးပါ။</i>\n\n"
         
     text += "=========================\n"
-    text += f"🟢 <b>ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n"
-    text += f"🔴 <b>ထွက်ငွေစုစုပေါင်း:</b> {total_exp:,.0f} Ks\n"
-    text += f"💰 <b>ဒီလ ပိုငွေ (Net):</b> {(total_inc - total_exp):,.0f} Ks"
+    text += f"🟢 <b>ဒီလ ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n"
+    text += f"🔴 <b>ဒီလ ထွက်ငွေစုစုပေါင်း:</b> {total_exp:,.0f} Ks\n"
+    text += f"---------------------------\n"
+    text += f"💵 <b>ဒီလ ပိုငွေ/လက်ကျန်:</b> {current_cash:,.0f} Ks\n"
+    text += f"📦 <b>လက်ရှိ Stock တန်ဖိုး:</b> {total_stock_val:,.0f} Ks\n"
     
     bot.send_message(message.chat.id, text[:4096], parse_mode="HTML")
 
+# --- [စုစုပေါင်းလက်ကျန်တွင် စုစုပေါင်းပိုင်ဆိုင်မှုပါ တွက်ချက်ပြသခြင်း] ---
 @bot.message_handler(func=lambda m: m.text == "💰 စုစုပေါင်းလက်ကျန်")
 def check_total_balance(message):
     user_id = message.from_user.id
@@ -686,8 +687,20 @@ def check_total_balance(message):
     total_expense = cursor.fetchone()[0] or 0.0
     conn.close()
     
-    text = f"🏦 စုစုပေါင်း ငွေကြေးစာရင်းချုပ်\n\n🟢 ဝင်ငွေ: {total_income:,.0f} Ks\n🔴 ထွက်ငွေ: {total_expense:,.0f} Ks\n---------------------------\n💰 လက်ရှိကျန်ငွေ: {(total_income - total_expense):,.0f} Ks"
-    bot.send_message(message.chat.id, text)
+    current_cash = total_income - total_expense
+    total_stock_val = get_total_stock_value(user_id)
+    total_asset = current_cash + total_stock_val
+    
+    text = f"🏦 <b>စုစုပေါင်း ပိုင်ဆိုင်မှု အကျဉ်းချုပ်</b>\n\n"
+    text += f"🟢 ဝင်ငွေ စုစုပေါင်း: {total_income:,.0f} Ks\n"
+    text += f"🔴 ထွက်ငွေ စုစုပေါင်း: {total_expense:,.0f} Ks\n"
+    text += f"---------------------------\n"
+    text += f"💵 <b>လက်ရှိ ငွေသား (Cash):</b> {current_cash:,.0f} Ks\n"
+    text += f"📦 <b>လက်ရှိ Stock တန်ဖိုး:</b> {total_stock_val:,.0f} Ks\n"
+    text += f"=========================\n"
+    text += f"💎 <b>စုစုပေါင်း ပိုင်ဆိုင်မှု (Cash + Stock): {total_asset:,.0f} Ks</b>"
+    
+    bot.send_message(message.chat.id, text, parse_mode="HTML")
 
 # ----------------- Backup နှင့် Recover -----------------
 @bot.message_handler(func=lambda m: m.text == "💾 Backup ယူမည်")
@@ -779,5 +792,5 @@ def handle_reset_choice(call):
 
 if __name__ == '__main__':
     keep_alive()
-    print("Bot is running with Delivery Fee Optional feature...")
+    print("Bot is running with Full Net Worth (Cash + Stock) calculation...")
     bot.infinity_polling()
