@@ -67,6 +67,10 @@ def init_db():
         cursor.execute('ALTER TABLE inventory ADD COLUMN rented_in INTEGER DEFAULT 0')
     except:
         pass
+    try:
+        cursor.execute('ALTER TABLE stock_logs ADD COLUMN deli_trans_id INTEGER')
+    except:
+        pass
 
     conn.commit()
     conn.close()
@@ -113,7 +117,6 @@ def stock_menu():
     markup.add(types.KeyboardButton("🛒 ဝယ်မည် (Buy)"), types.KeyboardButton("🛍 ရောင်းမည် (Sell)"))
     markup.add(types.KeyboardButton("📦 Stock အဟောင်းသွင်းမည်"), types.KeyboardButton("🗑 ပျက်စီး/အလျော့ပြ"))
     markup.add(types.KeyboardButton("🔄 အငှားကဏ္ဍ (Rentals)"), types.KeyboardButton("📊 Stock တန်ဖိုး/လက်ကျန်"))
-    # မှားသွားရင်ပြန်ဖျက်မည့် ခလုတ်အသစ်
     markup.add(types.KeyboardButton("↩️ မှားသွားလျှင် ပြန်ဖျက်မည်"), types.KeyboardButton("🔙 ပင်မမီနူးသို့"))
     return markup
 
@@ -176,7 +179,8 @@ def process_transaction(message, trans_type):
 @bot.message_handler(func=lambda m: m.text == "🛒 ဝယ်မည် (Buy)")
 def ask_buy_stock(message):
     stock_list = get_available_stock_html(message.from_user.id, "all")
-    msg = bot.send_message(message.chat.id, stock_list + "ဝယ်ယူမည့် ပစ္စည်းအမည်၊ အရေအတွက် နှင့် ဝယ်ဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ထည့်ပါ။\n\nဥပမာ: <code>ဖုန်း, 5, 100000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    text = stock_list + "ဝယ်ယူမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ဝယ်ဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ထည့်ပါ။\n(ပို့ဆောင်ခ / Deli ခ ရှိပါက အဆုံးတွင် ထည့်သွင်းနိုင်ပါသည်။ မရှိပါက ထည့်ရန်မလိုပါ။)\n\nဥပမာ: <code>ဖုန်း, 5, 100000, 2000</code>\n(သို့မဟုတ်) <code>ဖုန်း, 5, 100000</code>"
+    msg = bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_buy_stock)
 
 def process_buy_stock(message):
@@ -185,6 +189,8 @@ def process_buy_stock(message):
         name = parts[0]
         qty = int(parts[1])
         buy_price = float(parts[2])
+        deli_fee = float(parts[3]) if len(parts) > 3 else 0.0
+        
         total_expense = qty * buy_price
         user_id = message.from_user.id
         
@@ -206,12 +212,23 @@ def process_buy_stock(message):
                        (user_id, total_expense, f"{name} ဝယ်ယူခြင်း"))
         trans_id = cursor.lastrowid
         
-        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'buy', ?, ?, ?)", (user_id, name, qty, trans_id))
+        deli_trans_id = None
+        if deli_fee > 0:
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)",
+                           (user_id, deli_fee, f"{name} ဝယ်ယူရန် ပို့ဆောင်ခ"))
+            deli_trans_id = cursor.lastrowid
+        
+        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'buy', ?, ?, ?, ?)", (user_id, name, qty, trans_id, deli_trans_id))
 
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ ဝယ်ယူမှုမှတ်တမ်း တင်ပြီးပါပြီ။\n\nပစ္စည်း: {name}\nအဝယ်အရေအတွက်: {qty}\nစုစုပေါင်းကျသင့်ငွေ: {total_expense:,.0f} Ks\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
+        res_text = f"✅ ဝယ်ယူမှုမှတ်တမ်း တင်ပြီးပါပြီ။\n\nပစ္စည်း: {name}\nအဝယ်အရေအတွက်: {qty}\nစုစုပေါင်းကျသင့်ငွေ: {total_expense:,.0f} Ks"
+        if deli_fee > 0:
+            res_text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
+        res_text += f"\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု"
+        
+        bot.send_message(message.chat.id, res_text, reply_markup=stock_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
@@ -243,7 +260,7 @@ def process_old_stock(message):
             cursor.execute("INSERT INTO inventory (user_id, item_name, quantity, buy_price) VALUES (?, ?, ?, ?)", 
                            (user_id, name, qty, buy_price))
             
-        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'old_stock', ?, ?, NULL)", (user_id, name, qty))
+        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'old_stock', ?, ?, NULL, NULL)", (user_id, name, qty))
 
         conn.commit()
         conn.close()
@@ -254,7 +271,8 @@ def process_old_stock(message):
 @bot.message_handler(func=lambda m: m.text == "🛍 ရောင်းမည် (Sell)")
 def ask_sell_stock(message):
     stock_list = get_available_stock_html(message.from_user.id, "quantity > 0")
-    msg = bot.send_message(message.chat.id, stock_list + "ရောင်းမည့် ပစ္စည်းအမည်၊ အရေအတွက် နှင့် ရောင်းဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\n\nဥပမာ: <code>ဖုန်း, 2, 150000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    text = stock_list + "ရောင်းမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ရောင်းဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\n(ပို့ဆောင်ခ / Deli ခ ရှိပါက အဆုံးတွင် ထည့်သွင်းနိုင်ပါသည်။ မရှိပါက ထည့်ရန်မလိုပါ။)\n\nဥပမာ: <code>ဖုန်း, 2, 150000, 3000</code>\n(သို့မဟုတ်) <code>ဖုန်း, 2, 150000</code>"
+    msg = bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_sell_stock)
 
 def process_sell_stock(message):
@@ -263,8 +281,9 @@ def process_sell_stock(message):
         name = parts[0]
         qty = int(parts[1])
         sell_price = float(parts[2])
-        user_id = message.from_user.id
+        deli_fee = float(parts[3]) if len(parts) > 3 else 0.0
         
+        user_id = message.from_user.id
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
         
@@ -284,12 +303,23 @@ def process_sell_stock(message):
                        (user_id, total_income, f"{name} ရောင်းရငွေ"))
         trans_id = cursor.lastrowid
         
-        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'sell', ?, ?, ?)", (user_id, name, qty, trans_id))
+        deli_trans_id = None
+        if deli_fee > 0:
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)",
+                           (user_id, deli_fee, f"{name} ရောင်းချရန် ပို့ဆောင်ခ"))
+            deli_trans_id = cursor.lastrowid
+        
+        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'sell', ?, ?, ?, ?)", (user_id, name, qty, trans_id, deli_trans_id))
 
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ ရောင်းချမှု အောင်မြင်ပါသည်။\n\nပစ္စည်း: {name} ({qty} ခု)\nစုစုပေါင်းရငွေ: {total_income:,.0f} Ks\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
+        res_text = f"✅ ရောင်းချမှု အောင်မြင်ပါသည်။\n\nပစ္စည်း: {name} ({qty} ခု)\nစုစုပေါင်းရငွေ: {total_income:,.0f} Ks"
+        if deli_fee > 0:
+            res_text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
+        res_text += f"\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု"
+        
+        bot.send_message(message.chat.id, res_text, reply_markup=stock_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
@@ -316,7 +346,7 @@ def process_damage_stock(message):
         new_qty = row[1] - qty
         cursor.execute("UPDATE inventory SET quantity=? WHERE id=?", (new_qty, row[0]))
         
-        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'damage', ?, ?, NULL)", (user_id, name, qty))
+        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'damage', ?, ?, NULL, NULL)", (user_id, name, qty))
 
         conn.commit()
         conn.close()
@@ -329,25 +359,25 @@ def process_damage_stock(message):
 @bot.message_handler(func=lambda m: m.text == "📥 အငှားယူမည် (Borrow)")
 def ask_rent_in(message):
     stock_list = get_available_stock_html(message.from_user.id, "all")
-    msg = bot.send_message(message.chat.id, stock_list + "သူများဆီမှ အငှားယူမည့် ပစ္စည်းအမည် နှင့် အရေအတွက်ကို ရိုက်ပါ။\n\nဥပမာ: <code>စက်ဘီး, 2</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, stock_list + "သူများဆီမှ အငှားယူမည့် ပစ္စည်းအမည်၊ အရေအတွက်ကို ရိုက်ပါ။\n(ပို့ဆောင်ခ ရှိပါက အဆုံးတွင် ထည့်ပါ။ မရှိပါက မထည့်ပါနှင့်။)\n\nဥပမာ: <code>စက်ဘီး, 2, 1000</code> သို့မဟုတ် <code>စက်ဘီး, 2</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_renting, "borrow")
 
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပြန်အပ်မည်")
 def ask_return_borrow(message):
     stock_list = get_available_stock_html(message.from_user.id, "rented_in > 0")
-    msg = bot.send_message(message.chat.id, stock_list + "ပြန်အပ်မည့် ပစ္စည်းအမည်၊ အရေအတွက် နှင့် ပေးရမည့်ငှားခ(စုစုပေါင်း) ကို ရိုက်ပါ။ (ငှားခမပေးရပါက 0 ဟုထည့်ပါ)\n\nဥပမာ: <code>စက်ဘီး, 2, 5000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, stock_list + "ပြန်အပ်မည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ပေးရမည့်ငှားခ(စုစုပေါင်း) ကို ရိုက်ပါ။ (ငှားခမပေးရပါက 0 ဟုထည့်ပါ။ ပို့ဆောင်ခရှိပါက အဆုံးတွင် ထည့်ပါ။)\n\nဥပမာ: <code>စက်ဘီး, 2, 5000, 1000</code> သို့မဟုတ် <code>စက်ဘီး, 2, 5000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_renting, "return_borrow")
 
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပေးမည် (Lend)")
 def ask_rent_out(message):
     stock_list = get_available_stock_html(message.from_user.id, "quantity > 0")
-    msg = bot.send_message(message.chat.id, stock_list + "အခြားသူအား အငှားပေးမည့် ပစ္စည်းအမည် နှင့် အရေအတွက် ကိုရိုက်ပါ။\n\nဥပမာ: <code>စက်ဘီး, 1</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, stock_list + "အခြားသူအား အငှားပေးမည့် ပစ္စည်းအမည်၊ အရေအတွက် ကိုရိုက်ပါ။ (ပို့ဆောင်ခရှိပါက အဆုံးတွင် ထည့်ပါ။)\n\nဥပမာ: <code>စက်ဘီး, 1, 1000</code> သို့မဟုတ် <code>စက်ဘီး, 1</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_renting, "lend")
 
 @bot.message_handler(func=lambda m: m.text == "📥 အငှားပြန်ရမည်")
 def ask_return_lend(message):
     stock_list = get_available_stock_html(message.from_user.id, "rented_out > 0")
-    msg = bot.send_message(message.chat.id, stock_list + "ပြန်ရမည့် ပစ္စည်းအမည်၊ အရေအတွက် နှင့် ရမည့်ငှားခ(စုစုပေါင်း) ကို ရိုက်ပါ။ (ငှားခမရပါက 0 ဟုထည့်ပါ)\n\nဥပမာ: <code>စက်ဘီး, 1, 3000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, stock_list + "ပြန်ရမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ရမည့်ငှားခ(စုစုပေါင်း) ကို ရိုက်ပါ။ (ငှားခမရပါက 0 ဟုထည့်ပါ။ ပို့ဆောင်ခရှိပါက အဆုံးတွင် ထည့်ပါ။)\n\nဥပမာ: <code>စက်ဘီး, 1, 3000, 1000</code> သို့မဟုတ် <code>စက်ဘီး, 1, 3000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_renting, "return_lend")
 
 def process_renting(message, action):
@@ -355,9 +385,16 @@ def process_renting(message, action):
         parts = [p.strip() for p in message.text.split(',')]
         name = parts[0]
         qty = int(parts[1])
-        fee = float(parts[2]) if len(parts) > 2 else 0.0
-        user_id = message.from_user.id
         
+        fee = 0.0
+        deli_fee = 0.0
+        if action in ["borrow", "lend"]:
+            deli_fee = float(parts[2]) if len(parts) > 2 else 0.0
+        else:
+            fee = float(parts[2]) if len(parts) > 2 else 0.0
+            deli_fee = float(parts[3]) if len(parts) > 3 else 0.0
+
+        user_id = message.from_user.id
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
         cursor.execute("SELECT id, quantity, rented_in, rented_out FROM inventory WHERE user_id=? AND item_name=?", (user_id, name))
@@ -370,19 +407,32 @@ def process_renting(message, action):
 
         if not row and action == "borrow":
             cursor.execute("INSERT INTO inventory (user_id, item_name, quantity, rented_in, rented_out) VALUES (?, ?, 0, ?, 0)", (user_id, name, qty))
-            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'borrow', ?, ?, NULL)", (user_id, name, qty))
+            
+            deli_trans_id = None
+            if deli_fee > 0:
+                cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, deli_fee, f"{name} အငှားယူရန် ပို့ဆောင်ခ"))
+                deli_trans_id = cursor.lastrowid
+                
+            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'borrow', ?, ?, NULL, ?)", (user_id, name, qty, deli_trans_id))
             conn.commit()
-            bot.send_message(message.chat.id, f"📥 '{name}' ({qty} ခု) သူများဆီမှ အငှားယူစာရင်း သွင်းပြီးပါပြီ။", reply_markup=rent_menu())
+            bot.send_message(message.chat.id, f"📥 '{name}' ({qty} ခု) သူများဆီမှ အငှားယူစာရင်း သွင်းပြီးပါပြီ။\n{'🚚 ပို့ဆောင်ခ (ထွက်ငွေ): ' + str(deli_fee) + ' Ks' if deli_fee > 0 else ''}", reply_markup=rent_menu())
             conn.close()
             return
             
         item_id, current_qty, r_in, r_out = row
         trans_id = None
+        deli_trans_id = None
         
+        # Deli Fee အရင်သွင်းမည် (ရှိလျှင်)
+        if deli_fee > 0:
+            deli_note = f"{name} အငှားပို့ဆောင်ခ"
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, deli_fee, deli_note))
+            deli_trans_id = cursor.lastrowid
+            
         if action == "borrow":
             cursor.execute("UPDATE inventory SET rented_in=? WHERE id=?", (r_in + qty, item_id))
-            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'borrow', ?, ?, NULL)", (user_id, name, qty))
-            bot.send_message(message.chat.id, f"📥 '{name}' ({qty} ခု) သူများဆီမှ အငှားယူစာရင်း သွင်းပြီးပါပြီ။", reply_markup=rent_menu())
+            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'borrow', ?, ?, NULL, ?)", (user_id, name, qty, deli_trans_id))
+            bot.send_message(message.chat.id, f"📥 '{name}' ({qty} ခု) သူများဆီမှ အငှားယူစာရင်း သွင်းပြီးပါပြီ။\n{'🚚 ပို့ဆောင်ခ (ထွက်ငွေ): ' + str(deli_fee) + ' Ks' if deli_fee > 0 else ''}", reply_markup=rent_menu())
             
         elif action == "return_borrow":
             if r_in < qty:
@@ -392,16 +442,24 @@ def process_renting(message, action):
             if fee > 0:
                 cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, fee, f"{name} ငှားခပေးငွေ"))
                 trans_id = cursor.lastrowid
-            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'return_borrow', ?, ?, ?)", (user_id, name, qty, trans_id))
-            bot.send_message(message.chat.id, f"📤 '{name}' ({qty} ခု) အငှားပြန်အပ်ပြီးပါပြီ။\n{'🔴 ငှားခပေးငွေ (ထွက်ငွေ): ' + str(fee) + ' Ks' if fee > 0 else ''}", reply_markup=rent_menu())
+            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'return_borrow', ?, ?, ?, ?)", (user_id, name, qty, trans_id, deli_trans_id))
+            
+            res_txt = f"📤 '{name}' ({qty} ခု) အငှားပြန်အပ်ပြီးပါပြီ။\n"
+            if fee > 0: res_txt += f"🔴 ငှားခပေးငွေ (ထွက်ငွေ): {fee:,.0f} Ks\n"
+            if deli_fee > 0: res_txt += f"🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
+            bot.send_message(message.chat.id, res_txt, reply_markup=rent_menu())
             
         elif action == "lend":
             if current_qty < qty:
                 bot.send_message(message.chat.id, "⚠️ သင့်ထံတွင် အငှားပေးရန် လက်ရှိ Stock အလုံအလောက်မရှိပါ။", reply_markup=rent_menu())
                 return
             cursor.execute("UPDATE inventory SET quantity=?, rented_out=? WHERE id=?", (current_qty - qty, r_out + qty, item_id))
-            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'lend', ?, ?, NULL)", (user_id, name, qty))
-            bot.send_message(message.chat.id, f"📤 '{name}' ({qty} ခု) သူများအား အငှားပေးလိုက်ပါပြီ။\n📦 လက်ရှိကျန်သော Stock: {current_qty - qty} ခု", reply_markup=rent_menu())
+            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'lend', ?, ?, NULL, ?)", (user_id, name, qty, deli_trans_id))
+            
+            res_txt = f"📤 '{name}' ({qty} ခု) သူများအား အငှားပေးလိုက်ပါပြီ။\n"
+            if deli_fee > 0: res_txt += f"🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks\n"
+            res_txt += f"📦 လက်ရှိကျန်သော Stock: {current_qty - qty} ခု"
+            bot.send_message(message.chat.id, res_txt, reply_markup=rent_menu())
             
         elif action == "return_lend":
             if r_out < qty:
@@ -411,8 +469,12 @@ def process_renting(message, action):
             if fee > 0:
                 cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'income', ?, ?)", (user_id, fee, f"{name} ငှားခရငွေ"))
                 trans_id = cursor.lastrowid
-            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id) VALUES (?, 'return_lend', ?, ?, ?)", (user_id, name, qty, trans_id))
-            bot.send_message(message.chat.id, f"📥 '{name}' ({qty} ခု) အငှားပြန်လည်ရရှိပါပြီ။\n{'🟢 ငှားခရငွေ (ဝင်ငွေ): ' + str(fee) + ' Ks' if fee > 0 else ''}", reply_markup=rent_menu())
+            cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'return_lend', ?, ?, ?, ?)", (user_id, name, qty, trans_id, deli_trans_id))
+            
+            res_txt = f"📥 '{name}' ({qty} ခု) အငှားပြန်လည်ရရှိပါပြီ။\n"
+            if fee > 0: res_txt += f"🟢 ငှားခရငွေ (ဝင်ငွေ): {fee:,.0f} Ks\n"
+            if deli_fee > 0: res_txt += f"🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks\n"
+            bot.send_message(message.chat.id, res_txt, reply_markup=rent_menu())
 
         conn.commit()
         conn.close()
@@ -452,7 +514,7 @@ def undo_stock_menu(message):
         markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"undostock_{t_id}"))
     
     markup.add(types.InlineKeyboardButton("ပယ်ဖျက်မည်", callback_data="cancel_reset"))
-    bot.send_message(message.chat.id, "ဖျက်လိုသော Stock လုပ်ဆောင်ချက်ကို ရွေးချယ်ပါ (နောက်ဆုံး ၅ ခု) -\n(မှတ်ချက် - ဝယ်/ရောင်း/ငှားခ ငွေကြေးစာရင်းများပါ အလိုအလျောက် ပယ်ဖျက်ပေးမည်)", reply_markup=markup)
+    bot.send_message(message.chat.id, "ဖျက်လိုသော Stock လုပ်ဆောင်ချက်ကို ရွေးချယ်ပါ (နောက်ဆုံး ၅ ခု) -\n(မှတ်ချက် - ဝယ်/ရောင်း/ငှားခ ငွေကြေးစာရင်းများ နှင့် ပို့ဆောင်ခ(Deliခ) များပါ အလိုအလျောက် ပယ်ဖျက်ပေးမည်)", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("undostock_"))
 def process_stock_undo(call):
@@ -461,11 +523,11 @@ def process_stock_undo(call):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
     
-    cursor.execute("SELECT action_type, item_name, qty, trans_id FROM stock_logs WHERE id=? AND user_id=?", (t_id, user_id))
+    cursor.execute("SELECT action_type, item_name, qty, trans_id, deli_trans_id FROM stock_logs WHERE id=? AND user_id=?", (t_id, user_id))
     log = cursor.fetchone()
     
     if log:
-        a_type, name, qty, trans_id = log
+        a_type, name, qty, trans_id, deli_trans_id = log
         cursor.execute("SELECT id, quantity, rented_in, rented_out FROM inventory WHERE item_name=? AND user_id=?", (name, user_id))
         inv = cursor.fetchone()
         
@@ -489,12 +551,15 @@ def process_stock_undo(call):
                 new_qty -= qty
                 new_r_out += qty
                 
-            # Update Database
             cursor.execute("UPDATE inventory SET quantity=?, rented_in=?, rented_out=? WHERE id=?", (new_qty, new_r_in, new_r_out, inv_id))
         
-        # Financial Transaction တွဲပါလာခဲ့လျှင် အဲ့ဒါကိုပါ ဖြတ်မည်
+        # Financial Transaction များပါ ဖျက်မည် (Item Price)
         if trans_id:
             cursor.execute("DELETE FROM transactions WHERE id=?", (trans_id,))
+            
+        # Financial Transaction များပါ ဖျက်မည် (Deli Fee)
+        if deli_trans_id:
+            cursor.execute("DELETE FROM transactions WHERE id=?", (deli_trans_id,))
             
         cursor.execute("DELETE FROM stock_logs WHERE id=?", (t_id,))
         conn.commit()
@@ -714,5 +779,5 @@ def handle_reset_choice(call):
 
 if __name__ == '__main__':
     keep_alive()
-    print("Bot is running with Stock Undo feature...")
+    print("Bot is running with Delivery Fee Optional feature...")
     bot.infinity_polling()
