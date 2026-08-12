@@ -2,25 +2,48 @@ import sqlite3
 import telebot
 from telebot import types
 import os
+import time
+import requests
 from flask import Flask
 from threading import Thread
 
-# ----------------- Ping အတွက် Web Server Setup -----------------
+# ----------------- Ping အတွက် Web Server နှင့် Self-Ping Setup -----------------
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is running!"
+    return "Bot is running and awake!"
 
 def run_server():
+    # Flask ၏ မလိုအပ်သော Log များကို ဖျောက်ထားရန် (Console ရှင်းစေရန်)
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
     app.run(host='0.0.0.0', port=8080)
 
+def self_ping():
+    # သင်၏ Render Live URL ကို ထည့်သွင်းထားပါသည်
+    RENDER_URL = "https://caarng-kiung-cash.onrender.com" 
+    while True:
+        # ၁၀ မိနစ် (စက္ကန့် ၆၀၀) တိုင်း အလိုအလျောက် Ping ပြုလုပ်မည်
+        time.sleep(600) 
+        try:
+            requests.get(RENDER_URL)
+            print(f"Ping successful: Kept awake at {time.strftime('%H:%M:%S')}")
+        except Exception as e:
+            print(f"Ping failed: {e}")
+
 def keep_alive():
-    t = Thread(target=run_server)
-    t.start()
+    # Web Server ကို Thread ခွဲ၍ အလုပ်လုပ်စေခြင်း
+    server_thread = Thread(target=run_server)
+    server_thread.start()
+    
+    # မိမိကိုယ်ကို ပြန် Ping မည့် စနစ်ကိုပါ Thread ခွဲ၍ အလုပ်လုပ်စေခြင်း
+    ping_thread = Thread(target=self_ping)
+    ping_thread.start()
 # -----------------------------------------------------------------
 
-TOKEN = "8580240882:AAHVaMF1a9E_LyFJgLCEhdTomHgUBB-ijnI"
+TOKEN = "8580240882:AAFqZ_uXbAPI2aebG4tPr5CfigP9-fFIiEY"
 bot = telebot.TeleBot(TOKEN)
 
 def init_db():
@@ -58,18 +81,12 @@ def init_db():
         )
     ''')
     
-    try:
-        cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
-    except:
-        pass
-    try:
-        cursor.execute('ALTER TABLE inventory ADD COLUMN rented_in INTEGER DEFAULT 0')
-    except:
-        pass
-    try:
-        cursor.execute('ALTER TABLE stock_logs ADD COLUMN deli_trans_id INTEGER')
-    except:
-        pass
+    try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
+    except: pass
+    try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_in INTEGER DEFAULT 0')
+    except: pass
+    try: cursor.execute('ALTER TABLE stock_logs ADD COLUMN deli_trans_id INTEGER')
+    except: pass
 
     conn.commit()
     conn.close()
@@ -108,7 +125,6 @@ def get_total_stock_value(user_id):
     rows = cursor.fetchall()
     conn.close()
     
-    # ကိုယ်ပိုင် Stock တန်ဖိုး (လက်ရှိ + အငှားပေးထားသော)
     return sum((qty + r_out) * price for qty, r_out, price in rows)
 
 # ----------------- Menus -----------------
@@ -792,5 +808,5 @@ def handle_reset_choice(call):
 
 if __name__ == '__main__':
     keep_alive()
-    print("Bot is running with Full Net Worth (Cash + Stock) calculation...")
+    print("Bot is running with Self-Ping enabled...")
     bot.infinity_polling()
