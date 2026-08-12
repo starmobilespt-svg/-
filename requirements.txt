@@ -3,3 +3,4 @@ Pillow
 rembg
 gunicorn
 flask
+requests
