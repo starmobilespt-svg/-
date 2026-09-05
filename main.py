@@ -43,11 +43,8 @@ def keep_alive():
 TOKEN = "8580240882:AAF2T39e5csg8jQHDS6WBvRCS9D31VMoAO0"
 bot = telebot.TeleBot(TOKEN)
 
-# 📢 Admin ၏ User ID ကို သတ်မှတ်ခြင်း (လုံခြုံရေး နှင့် Broadcast အတွက်)
+# 📢 Admin ၏ User ID 
 ADMIN_IDS = [8668319365] 
-
-def is_admin(user_id):
-    return user_id in ADMIN_IDS
 
 def init_db():
     conn = sqlite3.connect('accounting.db')
@@ -114,7 +111,7 @@ def add_user(user_id):
     conn.commit()
     conn.close()
 
-# ----------------- Pagination Helpers (စာမျက်နှာခွဲစနစ်) -----------------
+# ----------------- Pagination Helpers -----------------
 def make_pagination_keyboard(page_cb_prefix, current_page, total_pages):
     markup = types.InlineKeyboardMarkup(row_width=3)
     if total_pages > 1:
@@ -135,24 +132,18 @@ def make_pagination_keyboard(page_cb_prefix, current_page, total_pages):
 
 def make_item_pagination_keyboard(items, item_cb_prefix, page_cb_prefix, current_page, total_pages):
     markup = types.InlineKeyboardMarkup(row_width=1)
-    # Item များကို ခလုတ်အနေဖြင့် ပြသရန်
     for item_id, text in items:
         markup.add(types.InlineKeyboardButton(text, callback_data=f"{item_cb_prefix}_{item_id}"))
     
-    # ⬅️ နောက် ➡️ စာမျက်နှာခလုတ်များ
     if total_pages > 1:
         nav_btns = []
-        if current_page > 0:
-            nav_btns.append(types.InlineKeyboardButton("⬅️ ယခင်", callback_data=f"{page_cb_prefix}_{current_page - 1}"))
-        else:
-            nav_btns.append(types.InlineKeyboardButton(" ", callback_data="ignore"))
+        if current_page > 0: nav_btns.append(types.InlineKeyboardButton("⬅️ ယခင်", callback_data=f"{page_cb_prefix}_{current_page - 1}"))
+        else: nav_btns.append(types.InlineKeyboardButton(" ", callback_data="ignore"))
             
         nav_btns.append(types.InlineKeyboardButton(f"📑 {current_page + 1} / {total_pages}", callback_data="ignore"))
         
-        if current_page < total_pages - 1:
-            nav_btns.append(types.InlineKeyboardButton("နောက် ➡️", callback_data=f"{page_cb_prefix}_{current_page + 1}"))
-        else:
-            nav_btns.append(types.InlineKeyboardButton(" ", callback_data="ignore"))
+        if current_page < total_pages - 1: nav_btns.append(types.InlineKeyboardButton("နောက် ➡️", callback_data=f"{page_cb_prefix}_{current_page + 1}"))
+        else: nav_btns.append(types.InlineKeyboardButton(" ", callback_data="ignore"))
         markup.row(*nav_btns)
         
     markup.add(types.InlineKeyboardButton("✖️ မလုပ်တော့ပါ (ပိတ်မည်)", callback_data="cancel_reset"))
@@ -179,8 +170,7 @@ def get_available_stock_html(user_id, condition="quantity > 0"):
     
     if not rows: return "📦 <i>ပြသရန် Stock မရှိသေးပါ။</i>\n\n"
     text = "📦 <b>ရွေးချယ်နိုင်သော Stock များ:</b>\n(အမည်ကို နှိပ်၍ Copy ကူးပါ)\n"
-    for r in rows:
-        text += f"▪️ <code>{r[0]}</code> - (လက်ကျန်: {r[1]} ခု)\n"
+    for r in rows: text += f"▪️ <code>{r[0]}</code> - (လက်ကျန်: {r[1]} ခု)\n"
     return text + "\n"
 
 def get_total_stock_value(user_id):
@@ -270,7 +260,7 @@ def process_transaction(message, trans_type):
 @bot.message_handler(func=lambda m: m.text == "🛒 ဝယ်မည် (Buy)")
 def ask_buy_stock(message):
     stock_list = get_available_stock_html(message.from_user.id, "all")
-    text = stock_list + "ဝယ်ယူမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ဝယ်ဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ထည့်ပါ။\n(ပို့ဆောင်ခ / Deli ခ ရှိပါက အဆုံးတွင် ထည့်သွင်းနိုင်ပါသည်။)\n\nဥပမာ: <code>ဖုန်း, 5, 100000, 2000</code>"
+    text = stock_list + "ဝယ်ယူမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ဝယ်ဈေး(တစ်ခုစာ) ကို ကော်မာ (,) ခြား၍ ရိုက်ထည့်ပါ။\n(ပို့ဆောင်ခ ရှိပါက အဆုံးတွင် ထည့်သွင်းနိုင်ပါသည်။)\n\nဥပမာ: <code>ဖုန်း, 5, 100000, 2000</code>"
     msg = bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_buy_stock)
 
@@ -462,10 +452,8 @@ def send_stock_val_page(chat_id, user_id, page, message_id=None):
         return
         
     markup = make_pagination_keyboard("page_stockval", page, total_pages)
-    if message_id:
-        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
-    else:
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
+    else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: m.text == "📊 Stock တန်ဖိုး/လက်ကျန်")
 def check_stock_value(message):
@@ -534,6 +522,33 @@ def show_month_report(message):
     text += f"💵 <b>ဒီလ ပိုငွေ/လက်ကျန်:</b> {(total_inc - total_exp):,.0f} Ks\n📦 <b>လက်ရှိ Stock တန်ဖိုး:</b> {get_total_stock_value(user_id):,.0f} Ks\n"
     bot.send_message(message.chat.id, text[:4096], parse_mode="HTML")
 
+@bot.message_handler(func=lambda m: m.text == "🗓 ဒီနှစ်စာရင်း")
+def show_year_report(message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT strftime('%m', date), SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y', date) = strftime('%Y', 'now', 'localtime') GROUP BY strftime('%m', date) ORDER BY strftime('%m', date)", (user_id,))
+    monthly_data = cursor.fetchall()
+    cursor.execute("SELECT SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y', date) = strftime('%Y', 'now', 'localtime')", (user_id,))
+    total_inc, total_exp = cursor.fetchone()
+    conn.close()
+    
+    total_inc, total_exp = total_inc or 0.0, total_exp or 0.0
+    
+    if not monthly_data:
+        bot.send_message(message.chat.id, "🗓 ဤနှစ်အတွက် မှတ်တမ်း မရှိသေးပါ။")
+        return
+        
+    text = "🗓 <b>ဒီနှစ် ဘဏ္ဍာရေး အစီရင်ခံစာ (နှစ်ချုပ်)</b>\n=========================\n\n"
+    for month, m_inc, m_exp in monthly_data:
+        m_inc, m_exp = m_inc or 0.0, m_exp or 0.0
+        text += f"📅 <b>လ - {month}</b>:\n   🟢 ဝင်ငွေ: +{m_inc:,.0f}\n   🔴 ထွက်ငွေ: -{m_exp:,.0f}\n\n"
+        
+    text += "=========================\n"
+    text += f"🟢 <b>ဒီနှစ် ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n🔴 <b>ဒီနှစ် ထွက်ငွေစုစုပေါင်း:</b> {total_exp:,.0f} Ks\n---------------------------\n"
+    text += f"💵 <b>ဒီနှစ် ပိုငွေ/လက်ကျန်:</b> {(total_inc - total_exp):,.0f} Ks\n"
+    bot.send_message(message.chat.id, text[:4096], parse_mode="HTML")
+
 @bot.message_handler(func=lambda m: m.text == "💰 စုစုပေါင်းလက်ကျန်")
 def check_total_balance(message):
     user_id = message.from_user.id
@@ -572,29 +587,85 @@ def wages_menu(message):
 def log_wage(message):
     try:
         parts = message.text.split()
-        name, amount = parts[1], float(parts[2])
+        if len(parts) < 3:
+            raise ValueError
+        amount = float(parts[-1]) 
+        name = " ".join(parts[1:-1]) 
+        
         user_id = message.from_user.id
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
         cursor.execute("INSERT INTO salaries (user_id, emp_name, amount) VALUES (?, ?, ?)", (user_id, name, amount))
         conn.commit()
         conn.close()
-        bot.reply_to(message, f"✅ {name} အတွက် လုပ်အားခ {amount:,.0f} Ks ကို မှတ်သားထားပါပြီ။")
+        bot.reply_to(message, f"✅ '{name}' အတွက် လုပ်အားခ {amount:,.0f} Ks ကို မှတ်သားထားပါပြီ။")
     except Exception:
-        bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။ ဥပမာ: <code>/wage AungAung 5000</code>", parse_mode="HTML")
+        bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/wage Ko Ko 50000</code>", parse_mode="HTML")
+
+@bot.message_handler(commands=['wages'])
+def check_wages(message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT emp_name, SUM(amount), COUNT(id) FROM salaries WHERE user_id=? AND status='unpaid' GROUP BY emp_name", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        bot.reply_to(message, "👥 လစာပေးရန်ကျန်ရှိသူ မရှိသေးပါ။")
+        return
+        
+    text = "👥 <b>ပေးရန်ကျန်ရှိသော လစာစာရင်းများ:</b>\n\n"
+    for r in rows:
+        text += f"▪️ {r[0]} - {r[1]:,.0f} Ks ({r[2]} ရက်စာ)\n"
+        
+    text += "\n💸 လစာရှင်းပေးလိုပါက <code>/paywage [နာမည်]</code> ဟု ရိုက်ထည့်ပါ။"
+    bot.reply_to(message, text, parse_mode="HTML")
+
+@bot.message_handler(commands=['wagelog'])
+def view_wage_log(message):
+    try:
+        parts = message.text.split()
+        if len(parts) < 2:
+            raise ValueError
+        name = " ".join(parts[1:]) 
+        user_id = message.from_user.id
+        
+        conn = sqlite3.connect('accounting.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT amount, date, status FROM salaries WHERE user_id=? AND emp_name=? ORDER BY id DESC LIMIT 15", (user_id, name))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            bot.reply_to(message, f"⚠️ '{name}' အတွက် မှတ်တမ်းမရှိပါ။")
+            return
+            
+        text = f"📋 <b>{name} ၏ လုပ်အားခ မှတ်တမ်း:</b>\n\n"
+        for r in rows:
+            status_icon = "✅" if r[2] == 'paid' else "⏳"
+            date_str = r[1].split()[0]
+            text += f"▪️ {date_str} : {r[0]:,.0f} Ks ({status_icon})\n"
+        bot.reply_to(message, text, parse_mode="HTML")
+    except:
+         bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/wagelog Ko Ko</code>", parse_mode="HTML")
 
 @bot.message_handler(commands=['paywage'])
 def pay_wage(message):
     try:
-        name = message.text.split()[1]
+        parts = message.text.split()
+        if len(parts) < 2:
+            raise ValueError
+        name = " ".join(parts[1:]) 
         user_id = message.from_user.id
+        
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
         cursor.execute("SELECT SUM(amount) FROM salaries WHERE user_id=? AND emp_name=? AND status='unpaid'", (user_id, name))
         total_unpaid = cursor.fetchone()[0]
         
         if not total_unpaid:
-            bot.reply_to(message, f"✅ {name} အတွက် ပေးရန်ကျန် လစာမရှိပါ။")
+            bot.reply_to(message, f"✅ '{name}' အတွက် ပေးရန်ကျန် လစာမရှိပါ။")
             conn.close()
             return
             
@@ -602,11 +673,11 @@ def pay_wage(message):
         cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, total_unpaid, f"{name} အား လစာရှင်းပေးခြင်း"))
         conn.commit()
         conn.close()
-        bot.reply_to(message, f"✅ {name} အား လစာစုစုပေါင်း {total_unpaid:,.0f} Ks ရှင်းပေးပြီးပါပြီ။ (ထွက်ငွေစာရင်းတွင် မှတ်သားထားပါသည်)")
-    except IndexError:
-        bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။ ဥပမာ: <code>/paywage AungAung</code>", parse_mode="HTML")
+        bot.reply_to(message, f"✅ '{name}' အား လစာစုစုပေါင်း {total_unpaid:,.0f} Ks ရှင်းပေးပြီးပါပြီ။ (ထွက်ငွေစာရင်းတွင် မှတ်သားထားပါသည်)")
+    except Exception:
+        bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/paywage Ko Ko</code>", parse_mode="HTML")
 
-# ----------------- ❌ 👥 လစာစာရင်းဖျက်ခြင်း (Pagination ဖြင့်) -----------------
+# ----------------- ❌ 👥 လစာစာရင်းဖျက်ခြင်း (Pagination) -----------------
 def send_delete_wage_page(chat_id, user_id, page, message_id=None):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
@@ -651,7 +722,7 @@ def process_wage_delete(call):
     conn.close()
     bot.edit_message_text("✅ ရွေးချယ်ထားသော လစာမှတ်တမ်းကို ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
 
-# ----------------- ❌ 💰 စာရင်းဖျက်ခြင်း (Pagination ဖြင့်) -----------------
+# ----------------- ❌ 💰 စာရင်းဖျက်ခြင်း (Pagination) -----------------
 def send_delete_trans_page(chat_id, user_id, page, message_id=None):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
@@ -700,7 +771,7 @@ def process_delete(call):
     conn.close()
     bot.edit_message_text("✅ ရွေးချယ်ထားသော စာရင်းကို ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
 
-# ----------------- ↩️ မှားသွားလျှင် ပြန်ဖျက်မည် Stock Undo (Pagination ဖြင့်) -----------------
+# ----------------- ↩️ မှားသွားလျှင် ပြန်ဖျက်မည် Stock Undo (Pagination) -----------------
 def send_undo_stock_page(chat_id, user_id, page, message_id=None):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
@@ -775,6 +846,145 @@ def process_stock_undo(call):
     else:
         bot.edit_message_text("⚠️ မှတ်တမ်း ရှာမတွေ့ပါ။", call.message.chat.id, call.message.message_id)
     conn.close()
+
+# ----------------- 📢 Admin Broadcast -----------------
+@bot.message_handler(commands=['broadcast'])
+def admin_broadcast(message):
+    if message.from_user.id not in ADMIN_IDS:
+        bot.reply_to(message, "⚠️ သင်သည် Admin မဟုတ်ပါ။")
+        return
+    
+    text = message.text.replace('/broadcast', '').strip()
+    if not text:
+        bot.reply_to(message, "ပေးပို့လိုသော စာသားကို ရိုက်ထည့်ပါ။ ဥပမာ - `/broadcast စနစ် Update ရှိပါသည်`")
+        return
+        
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users")
+    users = cursor.fetchall()
+    conn.close()
+    
+    success = 0
+    for u in users:
+        try:
+            bot.send_message(u[0], f"📢 <b>Admin Announcement:</b>\n\n{text}", parse_mode="HTML")
+            success += 1
+        except: pass
+    bot.reply_to(message, f"✅ စုစုပေါင်း {success} ယောက်ကို ပေးပို့ပြီးပါပြီ။")
+
+# ----------------- 💾 Backup / Restore (DB & Excel) -----------------
+@bot.message_handler(func=lambda m: m.text == "💾 Backup / Recover (Data)")
+def backup_recover_menu(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("💾 DB Backup ယူမည်", callback_data="backup_db"),
+        types.InlineKeyboardButton("♻️ DB Restore လုပ်မည်", callback_data="restore_db")
+    )
+    markup.add(
+        types.InlineKeyboardButton("📊 Excel ဖြင့် Backup ယူမည်", callback_data="backup_excel"),
+        types.InlineKeyboardButton("♻️ Excel Restore လုပ်မည်", callback_data="restore_excel")
+    )
+    bot.send_message(message.chat.id, "Data သိမ်းဆည်းခြင်း နှင့် ပြန်လည်ထည့်သွင်းခြင်း လုပ်ဆောင်ရန် ရွေးချယ်ပါ။", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data in ["backup_db", "restore_db", "backup_excel", "restore_excel"])
+def handle_backup_options(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    
+    if call.data == "backup_db":
+        bot.answer_callback_query(call.id, "DB Backup ယူနေပါသည်...")
+        if os.path.exists('accounting.db'):
+            with open('accounting.db', 'rb') as f: bot.send_document(chat_id, f, caption="💾 Database (.db) Backup ဖိုင် ရပါပြီ။")
+                
+    elif call.data == "restore_db":
+        msg = bot.send_message(chat_id, "ကျေးဇူးပြု၍ သင် Backup ယူထားသော **accounting.db** ဖိုင်ကို ဤနေရာသို့ ပေးပို့ပါ။", parse_mode="Markdown")
+        bot.register_next_step_handler(msg, process_db_recover)
+        
+    elif call.data == "backup_excel":
+        bot.answer_callback_query(call.id, "Excel ဖိုင် ထုတ်ယူနေပါသည်...")
+        bot.send_message(chat_id, "⏳ Excel ဖိုင် ဖန်တီးနေပါသည်။ ခဏစောင့်ပါ...")
+        
+        conn = sqlite3.connect('accounting.db')
+        df_trans = pd.read_sql("SELECT * FROM transactions WHERE user_id=?", conn, params=(user_id,))
+        df_inv = pd.read_sql("SELECT * FROM inventory WHERE user_id=?", conn, params=(user_id,))
+        df_logs = pd.read_sql("SELECT * FROM stock_logs WHERE user_id=?", conn, params=(user_id,))
+        df_salaries = pd.read_sql("SELECT * FROM salaries WHERE user_id=?", conn, params=(user_id,))
+        conn.close()
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_trans.to_excel(writer, sheet_name='Transactions', index=False)
+            df_inv.to_excel(writer, sheet_name='Inventory', index=False)
+            df_logs.to_excel(writer, sheet_name='StockLogs', index=False)
+            df_salaries.to_excel(writer, sheet_name='Salaries', index=False)
+            
+        output.seek(0)
+        bot.send_document(chat_id, document=('Accounting_Backup.xlsx', output), caption="📊 သင့် Data များကို Excel ဖြင့် ထုတ်ယူပေးလိုက်ပါပြီ။")
+        
+    elif call.data == "restore_excel":
+        msg = bot.send_message(chat_id, "ကျေးဇူးပြု၍ သင် Backup ယူထားသော **Excel (.xlsx)** ဖိုင်ကို ပေးပို့ပါ။\n⚠️ ယခင်ဒေတာများအပေါ်တွင် အစားထိုးမည်ဖြစ်သည်။")
+        bot.register_next_step_handler(msg, process_excel_recover)
+
+def process_db_recover(message):
+    if message.document:
+        try:
+            if not message.document.file_name.endswith('.db'):
+                bot.send_message(message.chat.id, "⚠️ .db ဖိုင်ကိုသာ ထည့်သွင်းပါ။")
+                return
+            file_info = bot.get_file(message.document.file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+            with open('accounting.db', 'wb') as new_file: new_file.write(downloaded_file)
+            init_db() 
+            bot.send_message(message.chat.id, "✅ Data များကို .db ဖြင့် အောင်မြင်စွာ ပြန်လည်ထည့်သွင်း ပြီးပါပြီ။")
+        except Exception:
+            bot.send_message(message.chat.id, "⚠️ .db ဖိုင်ထည့်သွင်းရာတွင် အမှားအယွင်းရှိနေပါသည်။")
+
+def process_excel_recover(message):
+    if message.document:
+        try:
+            if not message.document.file_name.endswith(('.xls', '.xlsx')):
+                bot.send_message(message.chat.id, "⚠️ Excel (.xlsx) ဖိုင်ကိုသာ ထည့်သွင်းပါ။")
+                return
+            
+            bot.send_message(message.chat.id, "⏳ Excel ဖိုင်ကို ဖတ်နေပါသည်... ခဏစောင့်ပါ။")
+            file_info = bot.get_file(message.document.file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+            file_stream = io.BytesIO(downloaded_file)
+            user_id = message.from_user.id
+            
+            conn = sqlite3.connect('accounting.db')
+            cursor = conn.cursor()
+            
+            try:
+                df_trans = pd.read_excel(file_stream, sheet_name='Transactions')
+                cursor.execute("DELETE FROM transactions WHERE user_id=?", (user_id,))
+                df_trans.to_sql('transactions', conn, if_exists='append', index=False)
+            except: pass
+            
+            try:
+                df_inv = pd.read_excel(file_stream, sheet_name='Inventory')
+                cursor.execute("DELETE FROM inventory WHERE user_id=?", (user_id,))
+                df_inv.to_sql('inventory', conn, if_exists='append', index=False)
+            except: pass
+            
+            try:
+                df_logs = pd.read_excel(file_stream, sheet_name='StockLogs')
+                cursor.execute("DELETE FROM stock_logs WHERE user_id=?", (user_id,))
+                df_logs.to_sql('stock_logs', conn, if_exists='append', index=False)
+            except: pass
+            
+            try:
+                df_salaries = pd.read_excel(file_stream, sheet_name='Salaries')
+                cursor.execute("DELETE FROM salaries WHERE user_id=?", (user_id,))
+                df_salaries.to_sql('salaries', conn, if_exists='append', index=False)
+            except: pass
+            
+            conn.commit()
+            conn.close()
+            bot.send_message(message.chat.id, "✅ Excel ဖိုင်မှ Data များကို အောင်မြင်စွာ ပြန်လည်ထည့်သွင်း (Recover) ပြီးပါပြီ။")
+        except Exception:
+            bot.send_message(message.chat.id, f"⚠️ ဖိုင်ထည့်သွင်းရာတွင် အမှားအယွင်းရှိနေပါသည်။")
 
 # ----------------- Reset / Cancel Handlers -----------------
 @bot.callback_query_handler(func=lambda call: call.data == "cancel_reset")
