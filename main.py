@@ -44,7 +44,7 @@ TOKEN = "8580240882:AAGppFyPdmCDvmcFglQj7YdhUQq_TeVSijA"
 bot = telebot.TeleBot(TOKEN)
 
 # 📢 Admin များ၏ User ID ကို ဤနေရာတွင် ထည့်ပါ။ (Broadcast လုပ်ရန်)
-ADMIN_IDS = [123456789, 987654321] # သင့် ID ပြောင်းထည့်ပါ
+ADMIN_IDS = [8668319365, 987654321] # သင့် ID ပြောင်းထည့်ပါ
 
 def init_db():
     conn = sqlite3.connect('accounting.db')
