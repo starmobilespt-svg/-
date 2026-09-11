@@ -60,7 +60,7 @@ def keep_alive():
 TOKEN = "8580240882:AAF2T39e5csg8jQHDS6WBvRCS9D31VMoAO0"
 bot = telebot.TeleBot(TOKEN)
 
-# 📢 Admin ၏ User ID (လိုအပ်ပါက ထပ်ထည့်နိုင်သည်)
+# 📢 Admin ၏ User ID 
 ADMIN_IDS = [8668319365] 
 
 def init_db():
@@ -109,7 +109,7 @@ def init_db():
         )
     ''')
     
-    # နောက်မှ ထပ်ဖြည့်ထားသော Column များ (Error မတက်စေရန် Try/Except ဖြင့်အုပ်ထားသည်)
+    # နောက်မှ ထပ်ဖြည့်ထားသော Column များ 
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
     except: pass
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_in INTEGER DEFAULT 0')
@@ -1005,7 +1005,27 @@ def process_stock_undo(call):
         bot.edit_message_text("⚠️ မှတ်တမ်း ရှာမတွေ့ပါ။", call.message.chat.id, call.message.message_id)
     conn.close()
 
-# ----------------- 📢 Admin Broadcast -----------------
+# ----------------- 👑 ADMIN COMMANDS -----------------
+@bot.message_handler(commands=['admin'])
+def admin_panel_help(message):
+    if message.from_user.id in ADMIN_IDS:
+        text = (
+            "👑 <b>Admin Commands List</b> 👑\n\n"
+            "📢 <b>Broadcast:</b>\n"
+            "<code>/broadcast [စာသား]</code>\n"
+            "- User အားလုံးဆီသို့ ကြေညာချက်ပို့ရန်။\n\n"
+            "💾 <b>Manual Backup:</b>\n"
+            "<code>/adminbackup</code>\n"
+            "- User အားလုံး၏ Data များပါဝင်သော Database (accounting.db) ဖိုင်ကို ချက်ချင်းယူရန်။\n\n"
+            "♻️ <b>Database Restore:</b>\n"
+            "<code>/adminrestore</code>\n"
+            "- Backup ယူထားသော Database ဖိုင်ကို ပြန်သွင်းရန်။\n"
+            "<i>(သတိ - ယခုလက်ရှိ Data များအားလုံး ပျက်သွားပြီး အသစ်တင်လိုက်သော ဖိုင်ဖြင့် အစားထိုးမည်)</i>"
+        )
+        bot.send_message(message.chat.id, text, parse_mode="HTML")
+    else:
+        bot.send_message(message.chat.id, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။")
+
 @bot.message_handler(commands=['broadcast'])
 def admin_broadcast(message):
     if message.from_user.id not in ADMIN_IDS:
@@ -1031,7 +1051,6 @@ def admin_broadcast(message):
         except: pass
     bot.reply_to(message, f"✅ စုစုပေါင်း {success} ယောက်ကို ပေးပို့ပြီးပါပြီ။")
 
-# ----------------- 👑 Admin Only: Full DB Backup & Restore -----------------
 @bot.message_handler(commands=['adminbackup'])
 def admin_manual_backup(message):
     if message.from_user.id in ADMIN_IDS:
@@ -1205,5 +1224,5 @@ def do_reset(call):
 
 if __name__ == '__main__':
     keep_alive()
-    print("Bot is running perfectly with Rentals and Auto Backup...")
+    print("Bot is running perfectly with Rentals, Auto Backup and Admin Help Command...")
     bot.infinity_polling()
