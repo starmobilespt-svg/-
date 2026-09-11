@@ -426,23 +426,25 @@ def process_damage_stock(message):
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
-# ================== အငှားကဏ္ဍ (RENTALS) ==================
+# ================== အငှားကဏ္ဍ (RENTALS) ဖြင့် ဝင်ငွေ/ထွက်ငွေများ ==================
 
 # ၁။ အငှားပေးမည် (Lend - မိမိ Stock ထဲမှ သူများကို ငှားခြင်း)
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပေးမည် (Lend)")
 def ask_lend_stock(message):
     stock_list = get_available_stock_html(message.from_user.id, "quantity > 0")
-    msg = bot.send_message(message.chat.id, stock_list + "သူတစ်ပါးထံ အငှားပေးမည့် ပစ္စည်းအမည် နှင့် အရေအတွက်ကို ကော်မာ(,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>ဖုန်း, 2</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, stock_list + "သူတစ်ပါးထံ အငှားပေးမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ပို့ဆောင်ခ(Delivery-မရှိလျှင် 0) ကို ကော်မာ(,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>ဖုန်း, 2, 1000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_lend_stock)
 
 def process_lend_stock(message):
     try:
         parts = [p.strip() for p in message.text.split(',')]
         name, qty = parts[0], int(parts[1])
+        deli_fee = float(parts[2]) if len(parts) > 2 else 0.0
         user_id = message.from_user.id
         
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
+        
         cursor.execute("SELECT id, quantity, rented_out FROM inventory WHERE user_id=? AND item_name=?", (user_id, name))
         row = cursor.fetchone()
         
@@ -451,29 +453,38 @@ def process_lend_stock(message):
             bot.send_message(message.chat.id, "⚠️ ငှားပေးရန် သင့်ထံတွင် Stock လက်ကျန် အလုံအလောက်မရှိပါ။", reply_markup=rent_menu())
             return
             
+        deli_trans_id = None
+        if deli_fee > 0:
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, deli_fee, f"{name} အငှားပေးရန် ပို့ဆောင်ခ"))
+            deli_trans_id = cursor.lastrowid
+            
         new_qty = row[1] - qty 
         new_rented_out = (row[2] if row[2] else 0) + qty 
         
         cursor.execute("UPDATE inventory SET quantity=?, rented_out=? WHERE id=?", (new_qty, new_rented_out, row[0]))
-        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty) VALUES (?, 'lend', ?, ?)", (user_id, name, qty))
+        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'lend', ?, ?, NULL, ?)", (user_id, name, qty, deli_trans_id))
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ {name} ({qty} ခု) ကို အငှားပေးလိုက်ပါပြီ။\n📦 သင့်လက်ကျန်: {new_qty} ခု", reply_markup=rent_menu())
+        text = f"✅ {name} ({qty} ခု) ကို အငှားပေးလိုက်ပါပြီ။\n📦 သင့်လက်ကျန်: {new_qty} ခု"
+        if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
+        bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: ဖုန်း, 2)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: ဖုန်း, 2, 1000)", reply_markup=rent_menu())
 
 # ၂။ အငှားပြန်ရမည် (Receive back - မိမိငှားထားသည်ကို ပြန်ရခြင်း)
 @bot.message_handler(func=lambda m: m.text == "📥 အငှားပြန်ရမည်")
 def ask_receive_rented(message):
     stock_list = get_available_stock_html(message.from_user.id, "rented_out > 0")
-    msg = bot.send_message(message.chat.id, stock_list + "ပြန်လည်လက်ခံရရှိမည့် ပစ္စည်းအမည် နှင့် အရေအတွက်ကို ရိုက်ပါ။\nဥပမာ: <code>ဖုန်း, 1</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, stock_list + "ပြန်လည်လက်ခံရရှိမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ငှားရမ်းခ(ရရှိမည့်ငွေ)၊ Delivery ခ(ရှိလျှင်) ကို ကော်မာ(,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>ဖုန်း, 1, 3000, 1000</code>\n(ငှားခမရှိပါက 0 ဟုထည့်ပါ)", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_receive_rented)
 
 def process_receive_rented(message):
     try:
         parts = [p.strip() for p in message.text.split(',')]
         name, qty = parts[0], int(parts[1])
+        rent_fee = float(parts[2]) if len(parts) > 2 else 0.0
+        deli_fee = float(parts[3]) if len(parts) > 3 else 0.0
         user_id = message.from_user.id
         
         conn = sqlite3.connect('accounting.db')
@@ -486,32 +497,52 @@ def process_receive_rented(message):
             bot.send_message(message.chat.id, "⚠️ သင်ငှားထားသော အရေအတွက်ထက် ပိုများနေပါသည်။", reply_markup=rent_menu())
             return
             
+        trans_id = None
+        if rent_fee > 0:
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'income', ?, ?)", (user_id, rent_fee, f"{name} အငှားပေးခဲ့သော ငှားခရရှိခြင်း"))
+            trans_id = cursor.lastrowid
+            
+        deli_trans_id = None
+        if deli_fee > 0:
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, deli_fee, f"{name} ပြန်လည်ရယူရန် ပို့ဆောင်ခ"))
+            deli_trans_id = cursor.lastrowid
+            
         new_qty = row[1] + qty 
         new_rented_out = row[2] - qty 
         
         cursor.execute("UPDATE inventory SET quantity=?, rented_out=? WHERE id=?", (new_qty, new_rented_out, row[0]))
-        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty) VALUES (?, 'return_lend', ?, ?)", (user_id, name, qty))
+        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'return_lend', ?, ?, ?, ?)", (user_id, name, qty, trans_id, deli_trans_id))
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ အငှားပေးထားသော {name} ({qty} ခု) ပြန်လည်ရရှိပါပြီ။", reply_markup=rent_menu())
+        text = f"✅ အငှားပေးထားသော {name} ({qty} ခု) ပြန်လည်ရရှိပါပြီ။"
+        if rent_fee > 0: text += f"\n💸 ငှားရမ်းခ (ဝင်ငွေ): {rent_fee:,.0f} Ks"
+        if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
+        bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: ဖုန်း, 1)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: ဖုန်း, 1, 3000, 1000)", reply_markup=rent_menu())
 
 # ၃။ အငှားယူမည် (Borrow - သူများဆီမှ မိမိက ငှားယူခြင်း)
 @bot.message_handler(func=lambda m: m.text == "📥 အငှားယူမည် (Borrow)")
 def ask_borrow_stock(message):
-    msg = bot.send_message(message.chat.id, "သူတစ်ပါးထံမှ ငှားယူလာမည့် ပစ္စည်းအမည် နှင့် အရေအတွက်ကို ရိုက်ပါ။\nဥပမာ: <code>စက်ဘီး, 3</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, "သူတစ်ပါးထံမှ ငှားယူလာမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ပို့ဆောင်ခ(Delivery-မရှိလျှင် 0) ကို ကော်မာ(,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>စက်ဘီး, 3, 2000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_borrow_stock)
 
 def process_borrow_stock(message):
     try:
         parts = [p.strip() for p in message.text.split(',')]
         name, qty = parts[0], int(parts[1])
+        deli_fee = float(parts[2]) if len(parts) > 2 else 0.0
         user_id = message.from_user.id
         
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
+        
+        deli_trans_id = None
+        if deli_fee > 0:
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, deli_fee, f"{name} အငှားယူရန် ပို့ဆောင်ခ"))
+            deli_trans_id = cursor.lastrowid
+            
         cursor.execute("SELECT id, quantity, rented_in FROM inventory WHERE user_id=? AND item_name=?", (user_id, name))
         row = cursor.fetchone()
         
@@ -522,25 +553,29 @@ def process_borrow_stock(message):
         else:
             cursor.execute("INSERT INTO inventory (user_id, item_name, quantity, rented_in, buy_price, sell_price) VALUES (?, ?, ?, ?, 0, 0)", (user_id, name, qty, qty))
             
-        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty) VALUES (?, 'borrow', ?, ?)", (user_id, name, qty))
+        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'borrow', ?, ?, NULL, ?)", (user_id, name, qty, deli_trans_id))
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ {name} ({qty} ခု) ကို အငှားယူလိုက်ပါပြီ။ သင့် Stock လက်ကျန်ထဲတွင် အသုံးပြုရန် အသင့်ဖြစ်ပါပြီ။", reply_markup=rent_menu())
+        text = f"✅ {name} ({qty} ခု) ကို အငှားယူလိုက်ပါပြီ။ သင့် Stock ထဲတွင် အသုံးပြုရန် အသင့်ဖြစ်ပါပြီ။"
+        if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
+        bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3, 2000)", reply_markup=rent_menu())
 
 # ၄။ အငှားပြန်အပ်မည် (Return - သူများဆီမှ ငှားထားသည်ကို ပြန်အပ်ခြင်း)
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပြန်အပ်မည်")
 def ask_return_borrowed(message):
     stock_list = get_available_stock_html(message.from_user.id, "rented_in > 0")
-    msg = bot.send_message(message.chat.id, stock_list + "ပိုင်ရှင်ထံသို့ ပြန်အပ်မည့် ပစ္စည်းအမည် နှင့် အရေအတွက်ကို ရိုက်ပါ။\nဥပမာ: <code>စက်ဘီး, 1</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, stock_list + "ပိုင်ရှင်ထံသို့ ပြန်အပ်မည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ငှားခ(ပေးရမည့်ငွေ)၊ Delivery ခ ကို ကော်မာ(,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>စက်ဘီး, 1, 5000, 1500</code>\n(ငှားခမရှိပါက 0 ဟုထည့်ပါ)", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_return_borrowed)
 
 def process_return_borrowed(message):
     try:
         parts = [p.strip() for p in message.text.split(',')]
         name, qty = parts[0], int(parts[1])
+        rent_fee = float(parts[2]) if len(parts) > 2 else 0.0
+        deli_fee = float(parts[3]) if len(parts) > 3 else 0.0
         user_id = message.from_user.id
         
         conn = sqlite3.connect('accounting.db')
@@ -553,18 +588,30 @@ def process_return_borrowed(message):
             bot.send_message(message.chat.id, "⚠️ သင့်ထံတွင် ပြန်အပ်ရန် အရေအတွက် မလုံလောက်ပါ။ (သို့) ငှားထားသောစာရင်း မှားယွင်းနေပါသည်။", reply_markup=rent_menu())
             return
             
+        trans_id = None
+        if rent_fee > 0:
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, rent_fee, f"{name} အငှားယူခဲ့သော ငှားခပေးခြင်း"))
+            trans_id = cursor.lastrowid
+            
+        deli_trans_id = None
+        if deli_fee > 0:
+            cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, deli_fee, f"{name} ပြန်အပ်ရန် ပို့ဆောင်ခ"))
+            deli_trans_id = cursor.lastrowid
+            
         new_qty = row[1] - qty
         new_rented_in = row[2] - qty
         
         cursor.execute("UPDATE inventory SET quantity=?, rented_in=? WHERE id=?", (new_qty, new_rented_in, row[0]))
-        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty) VALUES (?, 'return_borrow', ?, ?)", (user_id, name, qty))
+        cursor.execute("INSERT INTO stock_logs (user_id, action_type, item_name, qty, trans_id, deli_trans_id) VALUES (?, 'return_borrow', ?, ?, ?, ?)", (user_id, name, qty, trans_id, deli_trans_id))
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ ငှားယူထားသော {name} ({qty} ခု) ကို ပိုင်ရှင်ထံ ပြန်လည်အပ်နှံပြီးပါပြီ။", reply_markup=rent_menu())
+        text = f"✅ ငှားယူထားသော {name} ({qty} ခု) ကို ပိုင်ရှင်ထံ ပြန်လည်အပ်နှံပြီးပါပြီ။"
+        if rent_fee > 0: text += f"\n💸 ငှားရမ်းခ (ထွက်ငွေ): {rent_fee:,.0f} Ks"
+        if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
+        bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1)", reply_markup=rent_menu())
-
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
 
 # ----------------- 📊 Stock Valuation (Pagination ဖြင့်) -----------------
 def get_stock_val_page(user_id, page):
@@ -736,7 +783,7 @@ def wages_menu(message):
         "➕ <b>နေ့စဉ်လုပ်အားခ မှတ်ရန်:</b>\n<code>/wage [နာမည်] [ပမာဏ]</code>\n"
         "📋 <b>ပေးရန်ကျန် လစာစာရင်းကြည့်ရန်:</b>\n<code>/wages</code>\n"
         "📅 <b>လူတစ်ဦး၏ မှတ်တမ်းကြည့်ရန်:</b>\n<code>/wagelog [နာမည်]</code>\n"
-        "💸 <b>လစာရှင်းပေးရန်:</b>\n<code>/paywage [နာမည်]</code>\n"
+        "💸 <b>လစာရှင်းပေးရန်:</b>\n<code>/paywage [နာမည်] [ပမာဏ]</code>\n"
         "❌ <b>မှားသွင်းမိသောလစာ ဖျက်ရန်:</b>\n<code>/delwage</code>"
     )
     bot.send_message(message.chat.id, text, parse_mode="HTML")
@@ -765,7 +812,7 @@ def check_wages(message):
     user_id = message.from_user.id
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT emp_name, SUM(amount), COUNT(id) FROM salaries WHERE user_id=? AND status='unpaid' GROUP BY emp_name", (user_id,))
+    cursor.execute("SELECT emp_name, SUM(amount) FROM salaries WHERE user_id=? AND status='unpaid' GROUP BY emp_name", (user_id,))
     rows = cursor.fetchall()
     conn.close()
     
@@ -775,9 +822,10 @@ def check_wages(message):
         
     text = "👥 <b>ပေးရန်ကျန်ရှိသော လစာစာရင်းများ:</b>\n\n"
     for r in rows:
-        text += f"▪️ {r[0]} - {r[1]:,.0f} Ks ({r[2]} ရက်စာ)\n"
+        if r[1] > 0:
+            text += f"▪️ {r[0]} - {r[1]:,.0f} Ks\n"
         
-    text += "\n💸 လစာရှင်းပေးလိုပါက <code>/paywage [နာမည်]</code> ဟု ရိုက်ထည့်ပါ။"
+    text += "\n💸 လစာရှင်းပေးလိုပါက <code>/paywage [နာမည်] [ပမာဏ]</code> ဟု ရိုက်ထည့်ပါ။"
     bot.reply_to(message, text, parse_mode="HTML")
 
 @bot.message_handler(commands=['wagelog'])
@@ -801,9 +849,12 @@ def view_wage_log(message):
             
         text = f"📋 <b>{name} ၏ လုပ်အားခ မှတ်တမ်း:</b>\n\n"
         for r in rows:
-            status_icon = "✅" if r[2] == 'paid' else "⏳"
-            date_str = r[1].split()[0]
-            text += f"▪️ {date_str} : {r[0]:,.0f} Ks ({status_icon})\n"
+            amt, date_str, status = r[0], r[1].split()[0], r[2]
+            if amt < 0:
+                text += f"▪️ {date_str} : ရှင်းပေးငွေ/ထုတ်ငွေ {-amt:,.0f} Ks (✅)\n"
+            else:
+                status_icon = "✅" if status == 'paid' else "⏳"
+                text += f"▪️ {date_str} : {amt:,.0f} Ks ({status_icon})\n"
         bot.reply_to(message, text, parse_mode="HTML")
     except:
          bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/wagelog Ko Ko</code>", parse_mode="HTML")
@@ -812,28 +863,42 @@ def view_wage_log(message):
 def pay_wage(message):
     try:
         parts = message.text.split()
-        if len(parts) < 2:
-            raise ValueError
-        name = " ".join(parts[1:]) 
+        if len(parts) < 3:
+            bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/paywage Ko Ko 50000</code> (ပမာဏ သေချာထည့်ပါ)", parse_mode="HTML")
+            return
+            
+        pay_amount = float(parts[-1]) 
+        name = " ".join(parts[1:-1]) 
         user_id = message.from_user.id
         
         conn = sqlite3.connect('accounting.db')
         cursor = conn.cursor()
         cursor.execute("SELECT SUM(amount) FROM salaries WHERE user_id=? AND emp_name=? AND status='unpaid'", (user_id, name))
-        total_unpaid = cursor.fetchone()[0]
+        total_unpaid = cursor.fetchone()[0] or 0
         
-        if not total_unpaid:
+        if total_unpaid <= 0:
             bot.reply_to(message, f"✅ '{name}' အတွက် ပေးရန်ကျန် လစာမရှိပါ။")
             conn.close()
             return
             
-        cursor.execute("UPDATE salaries SET status='paid' WHERE user_id=? AND emp_name=? AND status='unpaid'", (user_id, name))
-        cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, total_unpaid, f"{name} အား လစာရှင်းပေးခြင်း"))
+        if pay_amount > total_unpaid:
+            bot.reply_to(message, f"⚠️ ပေးရန်ကျန်ငွေ ({total_unpaid:,.0f} Ks) ထက် ပိုနေပါသည်။")
+            conn.close()
+            return
+
+        # လစာအပြည့်ရှင်းခြင်း (သို့) တစ်စိတ်တစ်ပိုင်း ရှင်းခြင်း 
+        if pay_amount == total_unpaid:
+            cursor.execute("UPDATE salaries SET status='paid' WHERE user_id=? AND emp_name=? AND status='unpaid'", (user_id, name))
+        else:
+            # တစ်စိတ်တစ်ပိုင်းရှင်းလျှင် အနှုတ်ပြငွေဖြင့် ထည့်မည်
+            cursor.execute("INSERT INTO salaries (user_id, emp_name, amount, status) VALUES (?, ?, ?, 'unpaid')", (user_id, name, -pay_amount))
+            
+        cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, pay_amount, f"{name} အား လစာရှင်းပေးခြင်း"))
         conn.commit()
         conn.close()
-        bot.reply_to(message, f"✅ '{name}' အား လစာစုစုပေါင်း {total_unpaid:,.0f} Ks ရှင်းပေးပြီးပါပြီ။ (ထွက်ငွေစာရင်းတွင် မှတ်သားထားပါသည်)")
+        bot.reply_to(message, f"✅ '{name}' အား လစာငွေ {pay_amount:,.0f} Ks ရှင်းပေးပြီးပါပြီ။\nလက်ကျန်ပေးရန်: {(total_unpaid - pay_amount):,.0f} Ks")
     except Exception:
-        bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/paywage Ko Ko</code>", parse_mode="HTML")
+        bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/paywage Ko Ko 50000</code>", parse_mode="HTML")
 
 # ----------------- ❌ 👥 လစာစာရင်းဖျက်ခြင်း (Pagination) -----------------
 def send_delete_wage_page(chat_id, user_id, page, message_id=None):
@@ -1224,5 +1289,5 @@ def do_reset(call):
 
 if __name__ == '__main__':
     keep_alive()
-    print("Bot is running perfectly with Rentals, Auto Backup and Admin Help Command...")
+    print("Bot is running perfectly with Wages partial payments and Advanced Rentals...")
     bot.infinity_polling()
