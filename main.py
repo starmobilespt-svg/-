@@ -36,13 +36,13 @@ def self_ping():
 def schedule_daily_backup():
     while True:
         current_time = time.localtime()
-        # နေ့စဉ် ည ၁၁ နာရီ ၅၀ မိနစ်တိုင်း Admin ဆီသို့ Backup ပို့မည်
+        # နေ့စဉ် ည ၁၁ နာရီ ၅၀ မိနစ်တိုင်း Admin ဆီသို့ Database (.db) Backup ပို့မည်
         if current_time.tm_hour == 23 and current_time.tm_min == 50:
             for admin_id in ADMIN_IDS:
                 try:
                     if os.path.exists('accounting.db'):
                         with open('accounting.db', 'rb') as f:
-                            bot.send_document(admin_id, f, caption=f"📦 နေ့စဉ် Database Backup (Auto)\nDate: {time.strftime('%Y-%m-%d')}")
+                            bot.send_document(admin_id, f, caption=f"📦 နေ့စဉ် Database Backup (DB Auto)\nDate: {time.strftime('%Y-%m-%d')}")
                 except Exception as e:
                     print("Auto backup error:", e)
             time.sleep(60) # ၁ မိနစ်စောင့်မည်
@@ -57,7 +57,7 @@ def keep_alive():
     backup_thread.start()
 # -----------------------------------------------------------------
 
-TOKEN = "8580240882:AAF2T39e5csg8jQHDS6WBvRCS9D31VMoAO0"
+TOKEN = "8580240882:AAGL-RQdlmIOSm4VUx7y07l-ZY43HOrmdOY"
 bot = telebot.TeleBot(TOKEN)
 
 # 📢 Admin ၏ User ID 
@@ -191,13 +191,21 @@ def get_available_stock_html(user_id, condition="quantity > 0"):
     for r in rows: text += f"▪️ <code>{r[0]}</code> - (လက်ကျန်: {r[1]} ခု)\n"
     return text + "\n"
 
+# သူများဆီမှ ငှားယူထားသော ပစ္စည်းများ (rented_in) ကို တန်ဖိုးတွက်ချက်ရာတွင် မထည့်သွင်းပါ
 def get_total_stock_value(user_id):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT quantity, rented_out, buy_price FROM inventory WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT quantity, rented_out, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
     rows = cursor.fetchall()
     conn.close()
-    return sum((qty + r_out) * price for qty, r_out, price in rows)
+    
+    total_val = 0
+    for qty, r_out, r_in, price in rows:
+        r_out = r_out or 0
+        r_in = r_in or 0
+        owned_qty = qty + r_out - r_in
+        total_val += owned_qty * price
+    return total_val
 
 # ----------------- Menus -----------------
 def main_menu():
@@ -233,6 +241,7 @@ def send_welcome(message):
 
 @bot.message_handler(func=lambda m: m.text == "🔙 ပင်မမီနူးသို့")
 def back_to_main(message):
+    add_user(message.from_user.id)
     bot.send_message(message.chat.id, "ပင်မမီနူးသို့ ပြန်ရောက်ပါပြီ။", reply_markup=main_menu())
 
 @bot.message_handler(func=lambda m: m.text == "🔙 Stock မီနူးသို့")
@@ -241,6 +250,7 @@ def back_to_stock(message):
 
 @bot.message_handler(func=lambda m: m.text in ["📦 ဝယ်/ရောင်း/ငှား/stock", "ဝယ်/ရောင်း/ငှား/stock"])
 def show_stock_menu(message):
+    add_user(message.from_user.id)
     bot.send_message(message.chat.id, "📦 Stock စီမံခန့်ခွဲမှု စနစ်မှ ကြိုဆိုပါတယ်။", reply_markup=stock_menu())
 
 @bot.message_handler(func=lambda m: m.text == "🔄 အငှားကဏ္ဍ (Rentals)")
@@ -426,9 +436,8 @@ def process_damage_stock(message):
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
-# ================== အငှားကဏ္ဍ (RENTALS) ဖြင့် ဝင်ငွေ/ထွက်ငွေများ ==================
+# ================== အငှားကဏ္ဍ (RENTALS) ==================
 
-# ၁။ အငှားပေးမည် (Lend - မိမိ Stock ထဲမှ သူများကို ငှားခြင်း)
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပေးမည် (Lend)")
 def ask_lend_stock(message):
     stock_list = get_available_stock_html(message.from_user.id, "quantity > 0")
@@ -472,7 +481,6 @@ def process_lend_stock(message):
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: ဖုန်း, 2, 1000)", reply_markup=rent_menu())
 
-# ၂။ အငှားပြန်ရမည် (Receive back - မိမိငှားထားသည်ကို ပြန်ရခြင်း)
 @bot.message_handler(func=lambda m: m.text == "📥 အငှားပြန်ရမည်")
 def ask_receive_rented(message):
     stock_list = get_available_stock_html(message.from_user.id, "rented_out > 0")
@@ -522,7 +530,6 @@ def process_receive_rented(message):
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: ဖုန်း, 1, 3000, 1000)", reply_markup=rent_menu())
 
-# ၃။ အငှားယူမည် (Borrow - သူများဆီမှ မိမိက ငှားယူခြင်း)
 @bot.message_handler(func=lambda m: m.text == "📥 အငှားယူမည် (Borrow)")
 def ask_borrow_stock(message):
     msg = bot.send_message(message.chat.id, "သူတစ်ပါးထံမှ ငှားယူလာမည့် ပစ္စည်းအမည်၊ အရေအတွက်၊ ပို့ဆောင်ခ(Delivery-မရှိလျှင် 0) ကို ကော်မာ(,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>စက်ဘီး, 3, 2000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
@@ -563,7 +570,6 @@ def process_borrow_stock(message):
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3, 2000)", reply_markup=rent_menu())
 
-# ၄။ အငှားပြန်အပ်မည် (Return - သူများဆီမှ ငှားထားသည်ကို ပြန်အပ်ခြင်း)
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပြန်အပ်မည်")
 def ask_return_borrowed(message):
     stock_list = get_available_stock_html(message.from_user.id, "rented_in > 0")
@@ -625,7 +631,13 @@ def get_stock_val_page(user_id, page):
         conn.close()
         return None, 0, 0
         
-    grand_total_value = sum((qty + r_out) * price for _, qty, r_out, _, price in all_rows)
+    grand_total_value = 0
+    for _, qty, r_out, r_in, price in all_rows:
+        r_out = r_out or 0
+        r_in = r_in or 0
+        owned_qty = qty + r_out - r_in
+        grand_total_value += owned_qty * price
+        
     per_page = 5
     total_pages = (total_items + per_page - 1) // per_page
     
@@ -636,13 +648,16 @@ def get_stock_val_page(user_id, page):
     text = f"📊 <b>Stock စာရင်း (စာမျက်နှာ {page+1}/{total_pages})</b>\n=========================\n\n"
     for r in rows:
         name, qty, r_out, r_in, buy_price = r
-        owned_total = qty + r_out 
+        r_out = r_out or 0
+        r_in = r_in or 0
+        owned_total = qty + r_out - r_in 
         item_value = owned_total * buy_price
         
-        if owned_total > 0 or r_in > 0:
+        if qty > 0 or r_out > 0 or r_in > 0:
             text += f"🏷 <b>{name}</b>\n"
-            text += f"   📦 လက်ကျန်: {qty} + အငှားပေး: {r_out} = <b>{owned_total} ခု</b>\n"
-            if r_in > 0: text += f"   ⚠️ <i>အငှားယူထားသော: {r_in} ခု</i>\n"
+            text += f"   📦 လက်ကျန်: {qty} ခု\n"
+            if r_out > 0: text += f"   📤 သူများကိုငှားထား: {r_out} ခု\n"
+            if r_in > 0: text += f"   📥 သူများဆီမှငှားထား: {r_in} ခု\n"
             text += f"   💰 တန်ဖိုး: {owned_total} x {buy_price:,.0f} = <b>{item_value:,.0f} Ks</b>\n\n"
         
     text += f"=========================\n"
@@ -886,11 +901,9 @@ def pay_wage(message):
             conn.close()
             return
 
-        # လစာအပြည့်ရှင်းခြင်း (သို့) တစ်စိတ်တစ်ပိုင်း ရှင်းခြင်း 
         if pay_amount == total_unpaid:
             cursor.execute("UPDATE salaries SET status='paid' WHERE user_id=? AND emp_name=? AND status='unpaid'", (user_id, name))
         else:
-            # တစ်စိတ်တစ်ပိုင်းရှင်းလျှင် အနှုတ်ပြငွေဖြင့် ထည့်မည်
             cursor.execute("INSERT INTO salaries (user_id, emp_name, amount, status) VALUES (?, ?, ?, 'unpaid')", (user_id, name, -pay_amount))
             
         cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, pay_amount, f"{name} အား လစာရှင်းပေးခြင်း"))
@@ -1078,14 +1091,13 @@ def admin_panel_help(message):
             "👑 <b>Admin Commands List</b> 👑\n\n"
             "📢 <b>Broadcast:</b>\n"
             "<code>/broadcast [စာသား]</code>\n"
-            "- User အားလုံးဆီသို့ ကြေညာချက်ပို့ရန်။\n\n"
-            "💾 <b>Manual Backup:</b>\n"
+            "- Bot အသုံးပြုဖူးသူ အားလုံးဆီသို့ ကြေညာချက်ပို့ရန်။\n\n"
+            "💾 <b>DB Manual Backup:</b>\n"
             "<code>/adminbackup</code>\n"
-            "- User အားလုံး၏ Data များပါဝင်သော Database (accounting.db) ဖိုင်ကို ချက်ချင်းယူရန်။\n\n"
-            "♻️ <b>Database Restore:</b>\n"
+            "- Database (.db) ဖိုင်ကို ချက်ချင်းယူရန်။\n\n"
+            "♻️ <b>DB Database Restore:</b>\n"
             "<code>/adminrestore</code>\n"
-            "- Backup ယူထားသော Database ဖိုင်ကို ပြန်သွင်းရန်။\n"
-            "<i>(သတိ - ယခုလက်ရှိ Data များအားလုံး ပျက်သွားပြီး အသစ်တင်လိုက်သော ဖိုင်ဖြင့် အစားထိုးမည်)</i>"
+            "- Database (.db) ဖိုင်ဖြင့် အစားထိုးရန်။"
         )
         bot.send_message(message.chat.id, text, parse_mode="HTML")
     else:
@@ -1099,29 +1111,35 @@ def admin_broadcast(message):
     
     text = message.text.replace('/broadcast', '').strip()
     if not text:
-        bot.reply_to(message, "ပေးပို့လိုသော စာသားကို ရိုက်ထည့်ပါ။ ဥပမာ - `/broadcast စနစ် Update ရှိပါသည်`")
+        bot.reply_to(message, "ပေးပို့လိုသော စာသားကို ရိုက်ထည့်ပါ။\nဥပမာ - `/broadcast စနစ် Update ရှိပါသည်`", parse_mode="Markdown")
         return
         
+    bot.send_message(message.chat.id, "⏳ Broadcast ပေးပို့နေပါသည်... (User အားလုံးထံ ရောက်ရှိရန် အနည်းငယ် ကြာမြင့်နိုင်ပါသည်)")
+    
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users")
+    cursor.execute("SELECT DISTINCT user_id FROM users")
     users = cursor.fetchall()
     conn.close()
     
     success = 0
+    failed = 0
     for u in users:
         try:
             bot.send_message(u[0], f"📢 <b>Admin Announcement:</b>\n\n{text}", parse_mode="HTML")
             success += 1
-        except: pass
-    bot.reply_to(message, f"✅ စုစုပေါင်း {success} ယောက်ကို ပေးပို့ပြီးပါပြီ။")
+        except: 
+            failed += 1
+            
+    bot.reply_to(message, f"✅ စုစုပေါင်း အသုံးပြုဖူးသူ ({success}) ယောက်ကို အောင်မြင်စွာ ပေးပို့ပြီးပါပြီ။\n❌ ပေးပို့၍မရသူ: {failed} ယောက် (Bot ကို Block ထားသူများ)")
 
 @bot.message_handler(commands=['adminbackup'])
 def admin_manual_backup(message):
     if message.from_user.id in ADMIN_IDS:
         try:
-            with open('accounting.db', 'rb') as f:
-                bot.send_document(message.chat.id, f, caption="👑 Admin Manual Backup\n(User အားလုံး၏ Data ပါဝင်သည်)")
+            if os.path.exists('accounting.db'):
+                with open('accounting.db', 'rb') as f:
+                    bot.send_document(message.chat.id, f, caption="👑 Admin Manual Backup\n(Database .db ဖိုင်)")
         except Exception as e:
             bot.send_message(message.chat.id, f"⚠️ Backup ယူရာတွင် အမှားဖြစ်နေပါသည်: {e}")
     else:
@@ -1130,7 +1148,7 @@ def admin_manual_backup(message):
 @bot.message_handler(commands=['adminrestore'])
 def admin_restore_menu(message):
     if message.from_user.id in ADMIN_IDS:
-        msg = bot.send_message(message.chat.id, "👑 **Admin DB Restore**\nကျေးဇူးပြု၍ User အားလုံး၏ Data များပါဝင်သော `accounting.db` ဖိုင်ကို ပေးပို့ပါ။\n\n⚠️ သတိပြုရန် - ယခုလက်ရှိ Data များအားလုံး ဖျက်ခံရပြီး ပို့လိုက်သော ဖိုင်ဖြင့် အစားထိုးသွားပါမည်။", parse_mode="Markdown")
+        msg = bot.send_message(message.chat.id, "👑 **Admin DB Restore (.db)**\nကျေးဇူးပြု၍ `accounting.db` ဖိုင်ကို ပေးပို့ပါ။\n\n⚠️ **သတိပြုရန်** - ယခုလက်ရှိ Data များအားလုံး ဖျက်ခံရပြီး သင်ပို့လိုက်သော ဖိုင်ဖြင့် အစားထိုးသွားပါမည်။", parse_mode="Markdown")
         bot.register_next_step_handler(msg, process_admin_restore)
     else:
         bot.send_message(message.chat.id, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။")
@@ -1150,35 +1168,22 @@ def process_admin_restore(message):
         except Exception as e:
             bot.send_message(message.chat.id, f"⚠️ ဖိုင်ထည့်သွင်းရာတွင် အမှားရှိနေပါသည်: {e}")
 
-# ----------------- 💾 Backup / Restore (DB & Excel) User Levels -----------------
+# ----------------- 💾 Backup / Restore (Individual User Levels - EXCEL ONLY) -----------------
 @bot.message_handler(func=lambda m: m.text == "💾 Backup / Recover (Data)")
 def backup_recover_menu(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("💾 DB Backup ယူမည်", callback_data="backup_db"),
-        types.InlineKeyboardButton("♻️ DB Restore လုပ်မည်", callback_data="restore_db")
-    )
-    markup.add(
         types.InlineKeyboardButton("📊 Excel ဖြင့် Backup ယူမည်", callback_data="backup_excel"),
         types.InlineKeyboardButton("♻️ Excel Restore လုပ်မည်", callback_data="restore_excel")
     )
-    bot.send_message(message.chat.id, "Data သိမ်းဆည်းခြင်း နှင့် ပြန်လည်ထည့်သွင်းခြင်း လုပ်ဆောင်ရန် ရွေးချယ်ပါ။", reply_markup=markup)
+    bot.send_message(message.chat.id, "သင်၏ ကိုယ်ပိုင် Data များကို Excel ဖြင့် သိမ်းဆည်းရန်နှင့် ပြန်လည်ထည့်သွင်းရန် ရွေးချယ်ပါ။", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data in ["backup_db", "restore_db", "backup_excel", "restore_excel"])
+@bot.callback_query_handler(func=lambda call: call.data in ["backup_excel", "restore_excel"])
 def handle_backup_options(call):
     chat_id = call.message.chat.id
     user_id = call.from_user.id
     
-    if call.data == "backup_db":
-        bot.answer_callback_query(call.id, "DB Backup ယူနေပါသည်...")
-        if os.path.exists('accounting.db'):
-            with open('accounting.db', 'rb') as f: bot.send_document(chat_id, f, caption="💾 Database (.db) Backup ဖိုင် ရပါပြီ။")
-                
-    elif call.data == "restore_db":
-        msg = bot.send_message(chat_id, "ကျေးဇူးပြု၍ သင် Backup ယူထားသော **accounting.db** ဖိုင်ကို ဤနေရာသို့ ပေးပို့ပါ။", parse_mode="Markdown")
-        bot.register_next_step_handler(msg, process_db_recover)
-        
-    elif call.data == "backup_excel":
+    if call.data == "backup_excel":
         bot.answer_callback_query(call.id, "Excel ဖိုင် ထုတ်ယူနေပါသည်...")
         bot.send_message(chat_id, "⏳ Excel ဖိုင် ဖန်တီးနေပါသည်။ ခဏစောင့်ပါ...")
         
@@ -1202,20 +1207,6 @@ def handle_backup_options(call):
     elif call.data == "restore_excel":
         msg = bot.send_message(chat_id, "ကျေးဇူးပြု၍ သင် Backup ယူထားသော **Excel (.xlsx)** ဖိုင်ကို ပေးပို့ပါ။\n⚠️ ယခင်ဒေတာများအပေါ်တွင် အစားထိုးမည်ဖြစ်သည်။")
         bot.register_next_step_handler(msg, process_excel_recover)
-
-def process_db_recover(message):
-    if message.document:
-        try:
-            if not message.document.file_name.endswith('.db'):
-                bot.send_message(message.chat.id, "⚠️ .db ဖိုင်ကိုသာ ထည့်သွင်းပါ။")
-                return
-            file_info = bot.get_file(message.document.file_id)
-            downloaded_file = bot.download_file(file_info.file_path)
-            with open('accounting.db', 'wb') as new_file: new_file.write(downloaded_file)
-            init_db() 
-            bot.send_message(message.chat.id, "✅ Data များကို .db ဖြင့် အောင်မြင်စွာ ပြန်လည်ထည့်သွင်း ပြီးပါပြီ။")
-        except Exception:
-            bot.send_message(message.chat.id, "⚠️ .db ဖိုင်ထည့်သွင်းရာတွင် အမှားအယွင်းရှိနေပါသည်။")
 
 def process_excel_recover(message):
     if message.document:
@@ -1289,5 +1280,5 @@ def do_reset(call):
 
 if __name__ == '__main__':
     keep_alive()
-    print("Bot is running perfectly with Wages partial payments and Advanced Rentals...")
+    print("Bot is running perfectly with User Excel Backup & Admin DB Backup/Restore...")
     bot.infinity_polling()
