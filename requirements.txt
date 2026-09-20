@@ -1,5 +1,7 @@
 pyTelegramBotAPI
-flask
+Flask
 requests
 pandas
 openpyxl
+pymongo
+pytz
