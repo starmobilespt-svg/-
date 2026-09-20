@@ -8,6 +8,60 @@ from flask import Flask
 from threading import Thread
 import pandas as pd
 import io
+import pytz
+from datetime import datetime
+import pymongo
+
+# ----------------- MongoDB Setup -----------------
+# မိမိ၏ MongoDB Connection String ကို အောက်တွင် ထည့်ပါ။
+MONGO_URI = "mongodb+srv://User:310199@cluster0.oys0fgi.mongodb.net/?appName=Cluster0" 
+
+def sync_db_from_mongo():
+    if MONGO_URI == "YOUR_MONGODB_URI_HERE": return
+    try:
+        client = pymongo.MongoClient(MONGO_URI)
+        db = client['accounting_bot']
+        doc = db.backups.find_one({"name": "accounting.db"})
+        if doc:
+            with open('accounting.db', 'wb') as f:
+                f.write(doc['data'])
+            print("✅ MongoDB မှ Database အဟောင်းကို အောင်မြင်စွာ ဆွဲယူပြီးပါပြီ။")
+    except Exception as e:
+        print("MongoDB မှ ဆွဲယူရာတွင် အမှားရှိနေပါသည်:", e)
+
+def sync_db_to_mongo():
+    if MONGO_URI == "YOUR_MONGODB_URI_HERE": return
+    try:
+        if os.path.exists('accounting.db'):
+            with open('accounting.db', 'rb') as f:
+                data = f.read()
+            client = pymongo.MongoClient(MONGO_URI)
+            db = client['accounting_bot']
+            db.backups.update_one(
+                {"name": "accounting.db"},
+                {"$set": {"data": data}},
+                upsert=True
+            )
+            print("✅ MongoDB သို့ Database အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။")
+            
+            # --- Admin ဆီသို့ Update အောင်မြင်ကြောင်း အသိပေးသည့်အပိုင်း ---
+            tz = pytz.timezone('Asia/Yangon')
+            current_time = datetime.now(tz).strftime('%Y-%m-%d %I:%M %p')
+            for admin_id in ADMIN_IDS:
+                try:
+                    msg = f"☁️ <b>MongoDB Auto Sync</b>\n✅ Database ကို Cloud ပေါ်သို့ အောင်မြင်စွာ Update လုပ်ပြီးပါပြီ။\n⏰ အချိန်: {current_time}"
+                    bot.send_message(admin_id, msg, parse_mode="HTML")
+                except Exception as e:
+                    print(f"Admin {admin_id} သို့ အသိပေး၍မရပါ:", e)
+            # ---------------------------------------------------------
+            
+    except Exception as e:
+        print("MongoDB သို့ သိမ်းရာတွင် အမှားရှိနေပါသည်:", e)
+
+def auto_sync_mongo():
+    while True:
+        time.sleep(1800) # မိနစ် ၃၀ တိုင်း MongoDB ပေါ်သို့ Auto သိမ်းမည်
+        sync_db_to_mongo()
 
 # ----------------- Ping & Auto Backup Setup -----------------
 app = Flask('')
@@ -34,15 +88,17 @@ def self_ping():
             print(f"Ping failed: {e}")
 
 def schedule_daily_backup():
+    tz = pytz.timezone('Asia/Yangon')
     while True:
-        current_time = time.localtime()
-        # နေ့စဉ် ည ၁၁ နာရီ ၅၀ မိနစ်တိုင်း Admin ဆီသို့ Database (.db) Backup ပို့မည်
-        if current_time.tm_hour == 23 and current_time.tm_min == 50:
+        now = datetime.now(tz)
+        # ည ၁၂ နာရီတိတိ (Midnight) တွင် Auto Backup ပြုလုပ်မည်
+        if now.hour == 0 and now.minute == 0:
+            sync_db_to_mongo() # Admin ဆီ မပို့ခင် MongoDB ကို အရင် Update လုပ်မည်
             for admin_id in ADMIN_IDS:
                 try:
                     if os.path.exists('accounting.db'):
                         with open('accounting.db', 'rb') as f:
-                            bot.send_document(admin_id, f, caption=f"📦 နေ့စဉ် Database Backup (DB Auto)\nDate: {time.strftime('%Y-%m-%d')}")
+                            bot.send_document(admin_id, f, caption=f"📦 နေ့စဉ် Database Backup (Auto)\nDate: {now.strftime('%Y-%m-%d %I:%M %p')}")
                 except Exception as e:
                     print("Auto backup error:", e)
             time.sleep(60) # ၁ မိနစ်စောင့်မည်
@@ -55,6 +111,8 @@ def keep_alive():
     ping_thread.start()
     backup_thread = Thread(target=schedule_daily_backup)
     backup_thread.start()
+    mongo_thread = Thread(target=auto_sync_mongo)
+    mongo_thread.start()
 # -----------------------------------------------------------------
 
 TOKEN = "8580240882:AAGL-RQdlmIOSm4VUx7y07l-ZY43HOrmdOY"
@@ -119,8 +177,6 @@ def init_db():
 
     conn.commit()
     conn.close()
-
-init_db()
 
 def add_user(user_id):
     conn = sqlite3.connect('accounting.db')
@@ -191,7 +247,6 @@ def get_available_stock_html(user_id, condition="quantity > 0"):
     for r in rows: text += f"▪️ <code>{r[0]}</code> - (လက်ကျန်: {r[1]} ခု)\n"
     return text + "\n"
 
-# သူများဆီမှ ငှားယူထားသော ပစ္စည်းများ (rented_in) ကို တန်ဖိုးတွက်ချက်ရာတွင် မထည့်သွင်းပါ
 def get_total_stock_value(user_id):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
@@ -1279,6 +1334,18 @@ def do_reset(call):
     bot.edit_message_text("✅ မှတ်တမ်းအားလုံးကို အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
 
 if __name__ == '__main__':
+    # ၁။ Bot အသစ် run တိုင်း MongoDB ပေါ်က Data အဟောင်းကို အရင်ဆွဲယူမည်
+    sync_db_from_mongo()
+    
+    init_db()
     keep_alive()
-    print("Bot is running perfectly with User Excel Backup & Admin DB Backup/Restore...")
+    
+    # ၂။ Error 409 (Webhook Conflict) ဖြေရှင်းရန်
+    try:
+        bot.remove_webhook()
+        print("Webhook removed automatically to prevent Error 409.")
+    except:
+        pass
+        
+    print("Bot is running perfectly with MongoDB Cloud Sync & Admin Notifications...")
     bot.infinity_polling()
