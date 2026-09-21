@@ -7,7 +7,6 @@ import requests
 from flask import Flask
 from threading import Thread
 import pandas as pd
-import io
 import pytz
 from datetime import datetime
 import pymongo
@@ -699,12 +698,6 @@ def send_stock_val_page(chat_id, user_id, page, message_id=None):
 def check_stock_value(message):
     send_stock_val_page(message.chat.id, message.from_user.id, 0)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("page_stockval_"))
-def handle_stockval_page(call):
-    bot.answer_callback_query(call.id)
-    page = int(call.data.split("_")[2])
-    send_stock_val_page(call.message.chat.id, call.from_user.id, page, call.message.message_id)
-
 # ----------------- Reports (အစီရင်ခံစာများ) -----------------
 @bot.message_handler(func=lambda m: m.text == "📅 ဒီနေ့စာရင်း")
 def show_today_report(message):
@@ -966,25 +959,26 @@ def delete_wage_menu(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("page_delwage_"))
 def handle_delwage_page(call):
-    bot.answer_callback_query(call.id)
-    page = int(call.data.split("_")[2])
-    send_delete_wage_page(call.message.chat.id, call.from_user.id, page, call.message.message_id)
+    try:
+        bot.answer_callback_query(call.id)
+        page = int(call.data.split("_")[2])
+        send_delete_wage_page(call.message.chat.id, call.from_user.id, page, call.message.message_id)
+    except: pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("delwage_"))
 def process_wage_delete(call):
     try:
         bot.answer_callback_query(call.id, "ဖျက်နေပါသည်...")
-        w_id = call.data.split("_")[1]
-        conn = sqlite3.connect('accounting.db')
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM salaries WHERE id=? AND user_id=?", (int(w_id), call.from_user.id))
-        conn.commit()
-        conn.close()
+        w_id = int(call.data.split("_")[1])
+        with sqlite3.connect('accounting.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM salaries WHERE id=? AND user_id=?", (w_id, call.from_user.id))
+            conn.commit()
         bot.edit_message_text("✅ ရွေးချယ်ထားသော လစာမှတ်တမ်းကို ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
     except Exception as e:
         bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
-# ----------------- ❌ 💰 စာရင်းဖျက်ခြင်း (Pagination) - Error ရှင်းလင်းထားသည် -----------------
+# ----------------- ❌ 💰 စာရင်းဖျက်ခြင်း (Pagination) - ပိုမိုမြန်ဆန်အောင် ပြင်ဆင်ထားသည် -----------------
 def send_delete_trans_page(chat_id, user_id, page, message_id=None):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
@@ -1020,20 +1014,22 @@ def delete_menu(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("page_deltrans_"))
 def handle_deltrans_page(call):
-    bot.answer_callback_query(call.id)
-    page = int(call.data.split("_")[2])
-    send_delete_trans_page(call.message.chat.id, call.from_user.id, page, call.message.message_id)
+    try:
+        bot.answer_callback_query(call.id)
+        page = int(call.data.split("_")[2])
+        send_delete_trans_page(call.message.chat.id, call.from_user.id, page, call.message.message_id)
+    except: pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("deltrans_"))
 def process_delete(call):
     try:
+        # ခလုတ်နှိပ်သည်နှင့် ချက်ချင်း Response ပေးခြင်း
         bot.answer_callback_query(call.id, "ဖျက်နေပါသည်...")
-        t_id = call.data.split("_")[1]
-        conn = sqlite3.connect('accounting.db')
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM transactions WHERE id=? AND user_id=?", (int(t_id), call.from_user.id))
-        conn.commit()
-        conn.close()
+        t_id = int(call.data.split("_")[1])
+        with sqlite3.connect('accounting.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM transactions WHERE id=? AND user_id=?", (t_id, call.from_user.id))
+            conn.commit()
         bot.edit_message_text("✅ ရွေးချယ်ထားသော စာရင်းကို ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
     except Exception as e:
         bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
@@ -1076,46 +1072,48 @@ def undo_stock_menu(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("page_undostock_"))
 def handle_undostock_page(call):
-    bot.answer_callback_query(call.id)
-    page = int(call.data.split("_")[2])
-    send_undo_stock_page(call.message.chat.id, call.from_user.id, page, call.message.message_id)
+    try:
+        bot.answer_callback_query(call.id)
+        page = int(call.data.split("_")[2])
+        send_undo_stock_page(call.message.chat.id, call.from_user.id, page, call.message.message_id)
+    except: pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("undostock_"))
 def process_stock_undo(call):
     try:
         bot.answer_callback_query(call.id, "ပြန်လည်ပြင်ဆင်နေပါသည်...")
-        t_id = call.data.split("_")[1]
+        t_id = int(call.data.split("_")[1])
         user_id = call.from_user.id
-        conn = sqlite3.connect('accounting.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT action_type, item_name, qty, trans_id, deli_trans_id FROM stock_logs WHERE id=? AND user_id=?", (int(t_id), user_id))
-        log = cursor.fetchone()
         
-        if log:
-            a_type, name, qty, trans_id, deli_trans_id = log
-            cursor.execute("SELECT id, quantity, rented_in, rented_out FROM inventory WHERE item_name=? AND user_id=?", (name, user_id))
-            inv = cursor.fetchone()
+        with sqlite3.connect('accounting.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT action_type, item_name, qty, trans_id, deli_trans_id FROM stock_logs WHERE id=? AND user_id=?", (t_id, user_id))
+            log = cursor.fetchone()
             
-            if inv:
-                inv_id, current_qty, r_in, r_out = inv
-                new_qty, new_r_in, new_r_out = current_qty, r_in, r_out
-                if a_type in ['buy', 'old_stock']: new_qty -= qty
-                elif a_type in ['sell', 'damage']: new_qty += qty
-                elif a_type == 'borrow': new_r_in -= qty
-                elif a_type == 'return_borrow': new_r_in += qty
-                elif a_type == 'lend': new_qty += qty; new_r_out -= qty
-                elif a_type == 'return_lend': new_qty -= qty; new_r_out += qty
-                cursor.execute("UPDATE inventory SET quantity=?, rented_in=?, rented_out=? WHERE id=?", (new_qty, new_r_in, new_r_out, inv_id))
-            
-            if trans_id: cursor.execute("DELETE FROM transactions WHERE id=?", (trans_id,))
-            if deli_trans_id: cursor.execute("DELETE FROM transactions WHERE id=?", (deli_trans_id,))
+            if log:
+                a_type, name, qty, trans_id, deli_trans_id = log
+                cursor.execute("SELECT id, quantity, rented_in, rented_out FROM inventory WHERE item_name=? AND user_id=?", (name, user_id))
+                inv = cursor.fetchone()
                 
-            cursor.execute("DELETE FROM stock_logs WHERE id=?", (int(t_id),))
-            conn.commit()
-            bot.edit_message_text("✅ ရွေးချယ်ထားသော Stock မှတ်တမ်းကို ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
-        else:
-            bot.edit_message_text("⚠️ မှတ်တမ်း ရှာမတွေ့ပါ။", call.message.chat.id, call.message.message_id)
-        conn.close()
+                if inv:
+                    inv_id, current_qty, r_in, r_out = inv
+                    new_qty, new_r_in, new_r_out = current_qty, r_in, r_out
+                    if a_type in ['buy', 'old_stock']: new_qty -= qty
+                    elif a_type in ['sell', 'damage']: new_qty += qty
+                    elif a_type == 'borrow': new_r_in -= qty
+                    elif a_type == 'return_borrow': new_r_in += qty
+                    elif a_type == 'lend': new_qty += qty; new_r_out -= qty
+                    elif a_type == 'return_lend': new_qty -= qty; new_r_out += qty
+                    cursor.execute("UPDATE inventory SET quantity=?, rented_in=?, rented_out=? WHERE id=?", (new_qty, new_r_in, new_r_out, inv_id))
+                
+                if trans_id: cursor.execute("DELETE FROM transactions WHERE id=?", (trans_id,))
+                if deli_trans_id: cursor.execute("DELETE FROM transactions WHERE id=?", (deli_trans_id,))
+                    
+                cursor.execute("DELETE FROM stock_logs WHERE id=?", (t_id,))
+                conn.commit()
+                bot.edit_message_text("✅ ရွေးချယ်ထားသော Stock မှတ်တမ်းကို ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
+            else:
+                bot.edit_message_text("⚠️ မှတ်တမ်း ရှာမတွေ့ပါ။", call.message.chat.id, call.message.message_id)
     except Exception as e:
         bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
@@ -1186,7 +1184,7 @@ def process_admin_restore(message):
         except Exception as e:
             bot.send_message(message.chat.id, f"⚠️ ဖိုင်ထည့်သွင်းရာတွင် အမှားရှိနေပါသည်: {e}")
 
-# ----------------- 💾 Backup / Restore (Excel ပိုင်း အလုံးစုံ ပြင်ဆင်ထားသည်) -----------------
+# ----------------- 💾 Backup / Restore (စက်ထဲတွင် ယာယီ File သိမ်း၍ ခိုင်မာအောင် ပြင်ဆင်ထားသည်) -----------------
 @bot.message_handler(func=lambda m: m.text == "💾 Backup / Recover (Data)")
 def backup_recover_menu(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -1202,36 +1200,40 @@ def handle_backup_options(call):
     user_id = call.from_user.id
     
     if call.data == "backup_excel":
-        bot.answer_callback_query(call.id, "Excel ဖိုင် ထုတ်ယူနေပါသည်...")
-        bot.send_message(chat_id, "⏳ Excel ဖိုင် ဖန်တီးနေပါသည်။ ခဏစောင့်ပါ...")
-        
         try:
-            conn = sqlite3.connect('accounting.db')
-            df_trans = pd.read_sql_query("SELECT * FROM transactions WHERE user_id=?", conn, params=(user_id,))
-            df_inv = pd.read_sql_query("SELECT * FROM inventory WHERE user_id=?", conn, params=(user_id,))
-            df_logs = pd.read_sql_query("SELECT * FROM stock_logs WHERE user_id=?", conn, params=(user_id,))
-            df_salaries = pd.read_sql_query("SELECT * FROM salaries WHERE user_id=?", conn, params=(user_id,))
-            conn.close()
+            bot.answer_callback_query(call.id, "Excel ဖိုင် ထုတ်ယူနေပါသည်...")
+            bot.send_message(chat_id, "⏳ Excel ဖိုင် ဖန်တီးနေပါသည်။ ခဏစောင့်ပါ...")
             
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            with sqlite3.connect('accounting.db') as conn:
+                df_trans = pd.read_sql_query("SELECT * FROM transactions WHERE user_id=?", conn, params=(user_id,))
+                df_inv = pd.read_sql_query("SELECT * FROM inventory WHERE user_id=?", conn, params=(user_id,))
+                df_logs = pd.read_sql_query("SELECT * FROM stock_logs WHERE user_id=?", conn, params=(user_id,))
+                df_salaries = pd.read_sql_query("SELECT * FROM salaries WHERE user_id=?", conn, params=(user_id,))
+            
+            # Memory Error မဖြစ်စေရန် စက်ထဲတွင် ယာယီ File တည်ဆောက်ခြင်း
+            temp_file = f"Accounting_Backup_{user_id}.xlsx"
+            with pd.ExcelWriter(temp_file, engine='openpyxl') as writer:
                 df_trans.to_excel(writer, sheet_name='Transactions', index=False)
                 df_inv.to_excel(writer, sheet_name='Inventory', index=False)
                 df_logs.to_excel(writer, sheet_name='StockLogs', index=False)
                 df_salaries.to_excel(writer, sheet_name='Salaries', index=False)
-                
-            # ဖိုင်ကို သေချာစွာ ပြန်ဖတ်ရန် seek(0) လုပ်ပေးခြင်း
-            output.seek(0) 
-            output.name = f"Accounting_Backup_{datetime.now().strftime('%Y%m%d')}.xlsx" 
             
-            bot.send_document(chat_id, document=output, caption="📊 သင့် Data များကို Excel ဖြင့် ထုတ်ယူပေးလိုက်ပါပြီ။")
+            # File ပို့ပြီးသည်နှင့် ဖျက်ပစ်မည်
+            with open(temp_file, 'rb') as f:
+                bot.send_document(chat_id, document=f, caption=f"📊 သင့် Data များကို Excel ဖြင့် ထုတ်ယူပေးလိုက်ပါပြီ။\nDate: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+            
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                
         except Exception as e:
             bot.send_message(chat_id, f"⚠️ Excel ထုတ်ယူရာတွင် အမှားရှိနေပါသည်: {e}")
         
     elif call.data == "restore_excel":
-        bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id, "ကျေးဇူးပြု၍ သင် Backup ယူထားသော <b>Excel (.xlsx)</b> ဖိုင်ကို ပေးပို့ပါ။\n⚠️ ယခင်ဒေတာများအပေါ်တွင် အစားထိုးမည်ဖြစ်သည်။", parse_mode="HTML")
-        bot.register_next_step_handler(msg, process_excel_recover)
+        try:
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "ကျေးဇူးပြု၍ သင် Backup ယူထားသော <b>Excel (.xlsx)</b> ဖိုင်ကို ပေးပို့ပါ။\n⚠️ ယခင်ဒေတာများအပေါ်တွင် အစားထိုးမည်ဖြစ်သည်။", parse_mode="HTML")
+            bot.register_next_step_handler(msg, process_excel_recover)
+        except: pass
 
 def process_excel_recover(message):
     if is_cancel(message): return
@@ -1247,49 +1249,54 @@ def process_excel_recover(message):
         bot.send_message(message.chat.id, "⏳ Excel ဖိုင်ကို ဖတ်နေပါသည်... ခဏစောင့်ပါ။")
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-        file_stream = io.BytesIO(downloaded_file)
+        
+        # စက်ထဲတွင် ယာယီသိမ်း၍ ဖတ်ရှုခြင်း (Error လွတ်ကင်းစေရန်)
+        temp_file = f"temp_restore_{message.from_user.id}.xlsx"
+        with open(temp_file, 'wb') as new_file:
+            new_file.write(downloaded_file)
+            
+        df_trans = pd.read_excel(temp_file, sheet_name='Transactions', engine='openpyxl')
+        df_inv = pd.read_excel(temp_file, sheet_name='Inventory', engine='openpyxl')
+        df_logs = pd.read_excel(temp_file, sheet_name='StockLogs', engine='openpyxl')
+        df_salaries = pd.read_excel(temp_file, sheet_name='Salaries', engine='openpyxl')
+
         user_id = message.from_user.id
         
-        # Openpyxl Engine အသုံးပြု၍ ဖတ်ခြင်း
-        df_trans = pd.read_excel(file_stream, sheet_name='Transactions', engine='openpyxl')
-        df_inv = pd.read_excel(file_stream, sheet_name='Inventory', engine='openpyxl')
-        df_logs = pd.read_excel(file_stream, sheet_name='StockLogs', engine='openpyxl')
-        df_salaries = pd.read_excel(file_stream, sheet_name='Salaries', engine='openpyxl')
+        with sqlite3.connect('accounting.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM transactions WHERE user_id=?", (user_id,))
+            cursor.execute("DELETE FROM inventory WHERE user_id=?", (user_id,))
+            cursor.execute("DELETE FROM stock_logs WHERE user_id=?", (user_id,))
+            cursor.execute("DELETE FROM salaries WHERE user_id=?", (user_id,))
+            
+            def safe_restore(df, table_name):
+                if not df.empty:
+                    if 'id' in df.columns:
+                        df = df.drop(columns=['id'])
+                    df['user_id'] = user_id
+                    df.to_sql(table_name, conn, if_exists='append', index=False)
 
-        conn = sqlite3.connect('accounting.db')
-        cursor = conn.cursor()
-        
-        # ယခင် Data အဟောင်းများကို ရှင်းလင်းမည်
-        cursor.execute("DELETE FROM transactions WHERE user_id=?", (user_id,))
-        cursor.execute("DELETE FROM inventory WHERE user_id=?", (user_id,))
-        cursor.execute("DELETE FROM stock_logs WHERE user_id=?", (user_id,))
-        cursor.execute("DELETE FROM salaries WHERE user_id=?", (user_id,))
-        
-        # UNIQUE Constraint မဖြစ်စေရန် Data ပြန်သွင်းရာတွင် id ကို ဖြုတ်၍ သွင်းမည့် Helper
-        def safe_restore(df, table_name):
-            if not df.empty:
-                if 'id' in df.columns:
-                    df = df.drop(columns=['id'])
-                # user_id မပါပါက ထည့်သွင်းပေးခြင်း
-                df['user_id'] = user_id
-                df.to_sql(table_name, conn, if_exists='append', index=False)
+            safe_restore(df_trans, 'transactions')
+            safe_restore(df_inv, 'inventory')
+            safe_restore(df_logs, 'stock_logs')
+            safe_restore(df_salaries, 'salaries')
+            conn.commit()
 
-        safe_restore(df_trans, 'transactions')
-        safe_restore(df_inv, 'inventory')
-        safe_restore(df_logs, 'stock_logs')
-        safe_restore(df_salaries, 'salaries')
-        
-        conn.commit()
-        conn.close()
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+            
         bot.send_message(message.chat.id, "✅ Excel ဖိုင်မှ Data များကို အောင်မြင်စွာ ပြန်လည်ထည့်သွင်း (Recover) ပြီးပါပြီ။", reply_markup=main_menu())
     except Exception as e:
-        bot.send_message(message.chat.id, f"⚠️ ဖိုင်ထည့်သွင်းရာတွင် အမှားအယွင်းရှိနေပါသည်။ Data (သို့) ဖိုင်အမျိုးအစား မှားယွင်းနေပါသည်။\nError: {e}", reply_markup=main_menu())
+        bot.send_message(message.chat.id, f"⚠️ ဖိုင်ထည့်သွင်းရာတွင် အမှားအယွင်းရှိနေပါသည်။\nError: {e}", reply_markup=main_menu())
 
 # ----------------- Reset / Cancel Handlers -----------------
 @bot.callback_query_handler(func=lambda call: call.data == "cancel_reset")
 def cancel_action(call):
-    bot.answer_callback_query(call.id)
-    bot.edit_message_text("✖️ လုပ်ဆောင်ချက်ကို ပယ်ဖျက်လိုက်ပါသည်။", call.message.chat.id, call.message.message_id)
+    try:
+        bot.answer_callback_query(call.id)
+        # Message အသစ်မပို့တော့ဘဲ လက်ရှိ Message ကို ဖျက်ပစ်ပါမည်
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except: pass
 
 @bot.message_handler(func=lambda m: m.text == "🔄 အသစ်ပြန်စမည်")
 def reset_confirm(message):
@@ -1299,17 +1306,19 @@ def reset_confirm(message):
 
 @bot.callback_query_handler(func=lambda call: call.data == "confirm_reset")
 def do_reset(call):
-    bot.answer_callback_query(call.id, "ဖျက်နေပါသည်...")
-    user_id = call.from_user.id
-    conn = sqlite3.connect('accounting.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM transactions WHERE user_id=?", (user_id,))
-    cursor.execute("DELETE FROM inventory WHERE user_id=?", (user_id,))
-    cursor.execute("DELETE FROM stock_logs WHERE user_id=?", (user_id,))
-    cursor.execute("DELETE FROM salaries WHERE user_id=?", (user_id,))
-    conn.commit()
-    conn.close()
-    bot.edit_message_text("✅ မှတ်တမ်းအားလုံးကို အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
+    try:
+        bot.answer_callback_query(call.id, "ဖျက်နေပါသည်...")
+        user_id = call.from_user.id
+        with sqlite3.connect('accounting.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM transactions WHERE user_id=?", (user_id,))
+            cursor.execute("DELETE FROM inventory WHERE user_id=?", (user_id,))
+            cursor.execute("DELETE FROM stock_logs WHERE user_id=?", (user_id,))
+            cursor.execute("DELETE FROM salaries WHERE user_id=?", (user_id,))
+            conn.commit()
+        bot.edit_message_text("✅ မှတ်တမ်းအားလုံးကို အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ။", call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
 if __name__ == '__main__':
     sync_db_from_mongo()
