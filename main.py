@@ -107,7 +107,7 @@ def keep_alive():
     mongo_thread.start()
 # -----------------------------------------------------------------
 
-TOKEN = "8580240882:AAGL-RQdlmIOSm4VUx7y07l-ZY43HOrmdOY"
+TOKEN = "8580240882:AAFjFObELZgZfsDziMlxBiWsvyhpRy1KTnI"
 bot = telebot.TeleBot(TOKEN)
 ADMIN_IDS = [8668319365] 
 
