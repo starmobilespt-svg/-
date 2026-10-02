@@ -119,8 +119,6 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_name TEXT, quantity INTEGER DEFAULT 0, buy_price REAL DEFAULT 0, sell_price REAL DEFAULT 0, rented_out INTEGER DEFAULT 0, rented_in INTEGER DEFAULT 0)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS stock_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, action_type TEXT, item_name TEXT, qty INTEGER, trans_id INTEGER, deli_trans_id INTEGER, date TIMESTAMP DEFAULT (datetime('now', 'localtime')))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS salaries (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, emp_name TEXT, amount REAL, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid')''')
-    
-    # ငွေချေး/ငွေပြန်ဆပ် စနစ်အတွက် Table အသစ် (loan_type ပါဝင်သည်)
     cursor.execute('''CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, borrower_name TEXT, principal REAL, interest REAL DEFAULT 0, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid', loan_type TEXT DEFAULT 'lend')''')
     
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
@@ -466,7 +464,7 @@ def process_damage_stock(message):
         conn.close()
         bot.send_message(message.chat.id, f"🗑 {name} ({qty} ခု) စာရင်းမှ ပယ်ဖျက်လိုက်ပါပြီ။\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
 # ================== အငှားကဏ္ဍ (RENTALS) ==================
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပေးမည် (Lend)")
@@ -654,10 +652,11 @@ def process_return_borrowed(message):
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
 
+
 # ----------------- 💸 ငွေချေး / ပြန်ဆပ် စနစ် (Loans) -----------------
 @bot.message_handler(func=lambda m: m.text == "💸 သူများကိုငွေချေးမည်")
 def ask_lend_money(message):
-    msg = bot.send_message(message.chat.id, "သင်က သူတစ်ပါးကို ငွေချေးပေးမည့်သူ၏ နာမည် နှင့် ပမာဏ ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>ကိုအောင်, 50000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, "သင်က သူတစ်ပါးကို ငွေချေးပေးမည့်သူ၏ နာမည် နှင့် ပမာဏ ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>ကိုအောင်</code>, <code>50000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_lend_money)
 
 def process_lend_money(message):
@@ -674,7 +673,7 @@ def process_lend_money(message):
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ '{name}' သို့ ငွေ {amount:,.0f} Ks ချေးပေးလိုက်ပါပြီ။ (ထွက်ငွေစာရင်းတွင် မှတ်သားပြီးပါပြီ)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, f"✅ '<code>{name}</code>' သို့ ငွေ {amount:,.0f} Ks ချေးပေးလိုက်ပါပြီ။ (ထွက်ငွေစာရင်းတွင် မှတ်သားပြီးပါပြီ)", parse_mode="HTML", reply_markup=rent_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားနေပါသည်။ ဥပမာ: ကိုအောင်, 50000", reply_markup=rent_menu())
 
@@ -689,7 +688,7 @@ def ask_receive_money(message):
     
     text = "💰 <b>ရရန်ကျန်သော ချေးငွေများ:</b>\n"
     if unpaid_loans:
-        for name, amt in unpaid_loans: text += f"▪️ {name}: {amt:,.0f} Ks\n"
+        for name, amt in unpaid_loans: text += f"▪️ <code>{name}</code> : {amt:,.0f} Ks\n"
     else:
         text += "ရရန်ကျန်ငွေ မရှိသေးပါ။\n"
         
@@ -716,13 +715,13 @@ def process_receive_money(message):
         
         conn.commit()
         conn.close()
-        bot.send_message(message.chat.id, f"✅ '{name}' ထံမှ ငွေ {total_received:,.0f} Ks ပြန်လည်လက်ခံရရှိပါပြီ။ (ဝင်ငွေစာရင်းတွင် မှတ်သားပြီးပါပြီ)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, f"✅ '<code>{name}</code>' ထံမှ ငွေ {total_received:,.0f} Ks ပြန်လည်လက်ခံရရှိပါပြီ။ (ဝင်ငွေစာရင်းတွင် မှတ်သားပြီးပါပြီ)", parse_mode="HTML", reply_markup=rent_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားနေပါသည်။ ဥပမာ: ကိုအောင်, 50000, 2000", reply_markup=rent_menu())
 
 @bot.message_handler(func=lambda m: m.text == "💳 သူများဆီငွေချေးမည်")
 def ask_borrow_money(message):
-    msg = bot.send_message(message.chat.id, "သင်က သူတစ်ပါးထံမှ ငွေချေးယူမည့်သူ၏ နာမည် နှင့် ပမာဏ ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>မစု, 100000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, "သင်က သူတစ်ပါးထံမှ ငွေချေးယူမည့်သူ၏ နာမည် နှင့် ပမာဏ ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>မစု</code>, <code>100000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_borrow_money)
 
 def process_borrow_money(message):
@@ -739,7 +738,7 @@ def process_borrow_money(message):
         conn.commit()
         conn.close()
         
-        bot.send_message(message.chat.id, f"✅ '{name}' ထံမှ ငွေ {amount:,.0f} Ks ချေးယူလိုက်ပါပြီ။ (ဝင်ငွေ(Cash) စာရင်းတွင် မှတ်သားပြီးပါပြီ)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, f"✅ '<code>{name}</code>' ထံမှ ငွေ {amount:,.0f} Ks ချေးယူလိုက်ပါပြီ။ (ဝင်ငွေ(Cash) စာရင်းတွင် မှတ်သားပြီးပါပြီ)", parse_mode="HTML", reply_markup=rent_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားနေပါသည်။ ဥပမာ: မစု, 100000", reply_markup=rent_menu())
 
@@ -754,7 +753,7 @@ def ask_repay_money(message):
     
     text = "💸 <b>ပေးရန်ကျန်သော ချေးငွေများ:</b>\n"
     if unpaid_loans:
-        for name, amt in unpaid_loans: text += f"▪️ {name}: {amt:,.0f} Ks\n"
+        for name, amt in unpaid_loans: text += f"▪️ <code>{name}</code> : {amt:,.0f} Ks\n"
     else:
         text += "ပေးရန်ကျန်ငွေ မရှိသေးပါ။\n"
         
@@ -781,7 +780,7 @@ def process_repay_money(message):
         
         conn.commit()
         conn.close()
-        bot.send_message(message.chat.id, f"✅ '{name}' ထံသို့ ငွေ {total_paid:,.0f} Ks ပြန်လည်ပေးဆပ်လိုက်ပါပြီ။ (ထွက်ငွေစာရင်းတွင် မှတ်သားပြီးပါပြီ)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, f"✅ '<code>{name}</code>' ထံသို့ ငွေ {total_paid:,.0f} Ks ပြန်လည်ပေးဆပ်လိုက်ပါပြီ။ (ထွက်ငွေစာရင်းတွင် မှတ်သားပြီးပါပြီ)", parse_mode="HTML", reply_markup=rent_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားနေပါသည်။ ဥပမာ: မစု, 100000, 5000", reply_markup=rent_menu())
 
@@ -816,9 +815,10 @@ def process_old_loan(message):
         conn.close()
         
         type_mm = "ရရန်ကျန်ငွေ (Lend)" if l_type == 'lend' else "ပေးရန်ကျန်ငွေ (Borrow)"
-        bot.send_message(message.chat.id, f"✅ စာရင်းဟောင်းသွင်းခြင်း အောင်မြင်ပါသည်။\n\nအမျိုးအစား: {type_mm}\nနာမည်: {name}\nပမာဏ: {amount:,.0f} Ks", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, f"✅ စာရင်းဟောင်းသွင်းခြင်း အောင်မြင်ပါသည်။\n\nအမျိုးအစား: {type_mm}\nနာမည်: <code>{name}</code>\nပမာဏ: {amount:,.0f} Ks", parse_mode="HTML", reply_markup=rent_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားနေပါသည်။\nဥပမာ (ရရန်): lend, ကိုအောင်, 50000\nဥပမာ (ပေးရန်): borrow, မစု, 20000", reply_markup=rent_menu())
+
 
 # ----------------- 📊 Stock Valuation (Pagination ဖြင့်) -----------------
 def get_stock_val_page(user_id, page):
@@ -987,6 +987,27 @@ def generate_month_report(chat_id, user_id, yyyy_mm, message_id=None):
         text += f"🏆 <b>စုစုပေါင်း {symbol} (Net Profit): {net_profit:,.0f} Ks</b>\n"
         text += "<i>(တွက်ချက်ပုံ: ဝင်ငွေ-ထွက်ငွေ + (နောက်ဆုံးStock-လအစStock))</i>\n"
         
+        # --- အကြွေးစာရင်း အကျဉ်းချုပ် (Loan Summary with copyable names) ---
+        cursor.execute("SELECT borrower_name, SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' AND loan_type='lend' GROUP BY borrower_name", (user_id,))
+        unpaid_lends = cursor.fetchall()
+        
+        cursor.execute("SELECT borrower_name, SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' AND loan_type='borrow' GROUP BY borrower_name", (user_id,))
+        unpaid_borrows = cursor.fetchall()
+
+        if unpaid_lends or unpaid_borrows:
+            text += "=========================\n"
+            text += "📔 <b>အကြွေးစာရင်း အကျဉ်းချုပ်</b>\n"
+            
+            if unpaid_lends:
+                text += "🟢 <b>ရရန်ကျန်ငွေ (Assets):</b>\n"
+                for name, amt in unpaid_lends:
+                    text += f"   ▪️ <code>{name}</code> : {amt:,.0f} Ks\n"
+                    
+            if unpaid_borrows:
+                text += "🔴 <b>ပေးရန်ကျန်ငွေ (Liabilities):</b>\n"
+                for name, amt in unpaid_borrows:
+                    text += f"   ▪️ <code>{name}</code> : {amt:,.0f} Ks\n"
+
     conn.close()
     
     markup = types.InlineKeyboardMarkup()
@@ -1179,11 +1200,13 @@ def check_total_balance(message):
     total_expense = cursor.fetchone()[0] or 0.0
     
     # ချေးငွေအကျဉ်းချုပ် (Loans)
-    cursor.execute("SELECT SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' AND loan_type='lend'", (user_id,))
-    total_lent = cursor.fetchone()[0] or 0.0
+    cursor.execute("SELECT borrower_name, SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' AND loan_type='lend' GROUP BY borrower_name", (user_id,))
+    unpaid_lends = cursor.fetchall()
+    total_lent = sum([amt for name, amt in unpaid_lends]) if unpaid_lends else 0.0
     
-    cursor.execute("SELECT SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' AND loan_type='borrow'", (user_id,))
-    total_borrowed = cursor.fetchone()[0] or 0.0
+    cursor.execute("SELECT borrower_name, SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' AND loan_type='borrow' GROUP BY borrower_name", (user_id,))
+    unpaid_borrows = cursor.fetchall()
+    total_borrowed = sum([amt for name, amt in unpaid_borrows]) if unpaid_borrows else 0.0
     conn.close()
     
     current_cash = total_income - total_expense
@@ -1194,10 +1217,15 @@ def check_total_balance(message):
     
     text = f"🏦 <b>စုစုပေါင်း ပိုင်ဆိုင်မှု အကျဉ်းချုပ်</b>\n\n"
     text += f"🟢 ဝင်ငွေ စုစုပေါင်း: {total_income:,.0f} Ks\n🔴 ထွက်ငွေ စုစုပေါင်း: {total_expense:,.0f} Ks\n---------------------------\n"
-    text += f"💵 <b>လက်ရှိ ငွေသား (Cash):</b> {current_cash:,.0f} Ks\n📦 <b>လက်ရှိ Stock တန်ဖိုး:</b> {total_stock_val:,.0f} Ks\n"
+    text += f"💵 <b>လက်ရှိ ငွေသား (Cash):</b> {current_cash:,.0f} Ks\n📦 <b>လက်ရှိ Stock တန်ဖိုး:</b> {total_stock_val:,.0f} Ks\n\n"
     
-    if total_lent > 0: text += f"➕ <b>ရရန်ကျန်ရှိသော ချေးငွေ (Assets):</b> {total_lent:,.0f} Ks\n"
-    if total_borrowed > 0: text += f"➖ <b>ပေးရန်ကျန်ရှိသော ချေးငွေ (Liabilities):</b> {total_borrowed:,.0f} Ks\n"
+    if unpaid_lends: 
+        text += f"➕ <b>ရရန်ကျန်ရှိသော ချေးငွေ (Assets): {total_lent:,.0f} Ks</b>\n"
+        for name, amt in unpaid_lends: text += f"   ▪️ <code>{name}</code> : {amt:,.0f} Ks\n"
+        
+    if unpaid_borrows: 
+        text += f"➖ <b>ပေးရန်ကျန်ရှိသော ချေးငွေ (Liabilities): {total_borrowed:,.0f} Ks</b>\n"
+        for name, amt in unpaid_borrows: text += f"   ▪️ <code>{name}</code> : {amt:,.0f} Ks\n"
         
     text += f"=========================\n"
     text += f"💎 <b>စုစုပေါင်း ပိုင်ဆိုင်မှု (Net Worth): {total_asset:,.0f} Ks</b>"
@@ -1464,7 +1492,7 @@ def send_undo_stock_page(chat_id, user_id, page, message_id=None):
     if message_id: bot.edit_message_text(text=text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode="HTML")
     else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
-@bot.message_handler(func=lambda m: m.text == "↩️️ မှားသွားလျှင် ပြန်ဖျက်မည်")
+@bot.message_handler(func=lambda m: m.text == "↩️ မှားသွားလျှင် ပြန်ဖျက်မည်")
 def undo_stock_menu(message):
     send_undo_stock_page(message.chat.id, message.from_user.id, 0)
 
@@ -1716,5 +1744,5 @@ if __name__ == '__main__':
     except:
         pass
         
-    print("Bot is running perfectly with Historical Month & Year features...")
+    print("Bot is running perfectly with clickable loan names...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
