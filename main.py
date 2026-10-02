@@ -13,7 +13,7 @@ from datetime import datetime
 import pymongo
 
 # ----------------- MongoDB Setup -----------------
-MONGO_URI = "mongodb+srv://User:310199@cluster0.oys0fgi.mongodb.net/?appName=Cluster0" 
+MONGO_URI = "mongodb+srv://User:310@cluster0.oys0fgi.mongodb.net/?appName=Cluster0" 
 
 def sync_db_from_mongo():
     if MONGO_URI == "YOUR_MONGODB_URI_HERE": return
@@ -107,7 +107,7 @@ def keep_alive():
     mongo_thread.start()
 # -----------------------------------------------------------------
 
-TOKEN = "8580240882:AAFjFObELZgZfsDziMlxBiWsvyhpRy1KTnI"
+TOKEN = "8580240:AAFjFObELZgZfsDziMlxBiWsvyhpRy1KTnI"
 bot = telebot.TeleBot(TOKEN)
 ADMIN_IDS = [8668319365] 
 
@@ -160,7 +160,7 @@ def answer_cb(call_id, text=None):
         else:
             bot.answer_callback_query(callback_query_id=call_id)
     except Exception as e:
-        print(f"Callback answer timeout (Safe ignored): {e}")
+        pass
 
 # ----------------- Pagination Helpers -----------------
 def make_pagination_keyboard(page_cb_prefix, current_page, total_pages):
@@ -383,7 +383,7 @@ def process_sell_stock(message):
         
         if not row or row[1] < qty:
             conn.close()
-            bot.send_message(message.chat.id, f"⚠️️ '{name}' အတွက် Stock မလုံလောက်ပါ။", reply_markup=stock_menu())
+            bot.send_message(message.chat.id, f"⚠️ '{name}' အတွက် Stock မလုံလောက်ပါ။", reply_markup=stock_menu())
             return
             
         new_qty = row[1] - qty
@@ -406,7 +406,7 @@ def process_sell_stock(message):
         res_text += f"\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု"
         bot.send_message(message.chat.id, res_text, reply_markup=stock_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: ဖုန်း, 2, 150000)", reply_markup=stock_menu())
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: ဖုန်း, 2, 150000)", reply_markup=stock_menu())
 
 @bot.message_handler(func=lambda m: m.text == "📦 Stock အဟောင်းသွင်းမည်")
 def ask_old_stock(message):
@@ -466,7 +466,7 @@ def process_damage_stock(message):
         conn.close()
         bot.send_message(message.chat.id, f"🗑 {name} ({qty} ခု) စာရင်းမှ ပယ်ဖျက်လိုက်ပါပြီ။\n📦 ယခု Stock လက်ကျန်: {new_qty} ခု", reply_markup=stock_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
+        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
 # ================== အငှားကဏ္ဍ (RENTALS) ==================
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပေးမည် (Lend)")
@@ -653,7 +653,6 @@ def process_return_borrowed(message):
         bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
-
 
 # ----------------- 💸 ငွေချေး / ပြန်ဆပ် စနစ် (Loans) -----------------
 @bot.message_handler(func=lambda m: m.text == "💸 သူများကိုငွေချေးမည်")
@@ -915,88 +914,214 @@ def show_today_report(message):
     text += f"---------------------------\n🟢 ဝင်ငွေ: {total_inc:,.0f} Ks\n🔴 ထွက်ငွေ: {total_exp:,.0f} Ks\n⚖️ လက်ကျန်: {(total_inc - total_exp):,.0f} Ks"
     bot.send_message(message.chat.id, text)
 
-# ----------------- 🗓 ဒီလစာရင်း (အသေးစိတ် + အရှုံးအမြတ်တွက်ချက်ခြင်း) -----------------
-@bot.message_handler(func=lambda m: m.text == "🗓 ဒီလစာရင်း")
-def show_month_report(message):
-    user_id = message.from_user.id
+
+# ----------------- 🗓 လအလိုက် / နှစ်အလိုက် စာရင်းများစနစ်သစ် (Historical) -----------------
+
+def generate_month_report(chat_id, user_id, yyyy_mm, message_id=None):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
     
-    # ဒီလ ဝင်ငွေ ထွက်ငွေ
-    cursor.execute("SELECT SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime')", (user_id,))
+    cursor.execute("SELECT SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y-%m', date) = ?", (user_id, yyyy_mm))
     total_inc, total_exp = cursor.fetchone()
     total_inc = total_inc or 0.0
     total_exp = total_exp or 0.0
     
-    # ယခု လက်ရှိ Stock တန်ဖိုး (Ending Stock)
-    cursor.execute("SELECT quantity, rented_out, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
-    inv_rows = cursor.fetchall()
-    ending_stock_val = 0
-    for qty, r_out, r_in, price in inv_rows:
-        r_out = r_out or 0
-        r_in = r_in or 0
-        ending_stock_val += (qty + r_out - r_in) * price
+    cursor.execute("SELECT note, SUM(amount) FROM transactions WHERE user_id=? AND type='income' AND strftime('%Y-%m', date) = ? GROUP BY note ORDER BY SUM(amount) DESC", (user_id, yyyy_mm))
+    incomes = cursor.fetchall()
+    
+    cursor.execute("SELECT note, SUM(amount) FROM transactions WHERE user_id=? AND type='expense' AND strftime('%Y-%m', date) = ? GROUP BY note ORDER BY SUM(amount) DESC", (user_id, yyyy_mm))
+    expenses = cursor.fetchall()
+    
+    text = f"🗓 <b>{yyyy_mm} လအတွက် ဘဏ္ဍာရေး အစီရင်ခံစာ</b>\n=========================\n\n"
+    
+    if incomes:
+        text += "🟢 <b>ဝင်ငွေ ခေါင်းစဉ်များ:</b>\n"
+        for note, amt in incomes: text += f"▪️ {note}: {amt:,.0f} Ks\n"
+        text += "\n"
+    if expenses:
+        text += "🔴 <b>ထွက်ငွေ (အသုံးစရိတ်) ခေါင်းစဉ်များ:</b>\n"
+        for note, amt in expenses: text += f"▪️ {note}: {amt:,.0f} Ks\n"
+        text += "\n"
         
-    # လအစ Stock ကို တွက်ချက်ရန်
-    cursor.execute("""
-        SELECT s.action_type, s.qty, i.buy_price
-        FROM stock_logs s
-        JOIN inventory i ON s.item_name = i.item_name AND s.user_id = i.user_id
-        WHERE s.user_id=? AND strftime('%Y-%m', s.date) = strftime('%Y-%m', 'now', 'localtime')
-    """, (user_id,))
-    logs = cursor.fetchall()
+    text += "=========================\n"
+    text += f"🟢 စုစုပေါင်းဝင်ငွေ: {total_inc:,.0f} Ks\n"
+    text += f"🔴 စုစုပေါင်းထွက်ငွေ: {total_exp:,.0f} Ks\n"
+    text += f"💵 <b>ငွေသားပိုငွေ (Cash Flow): {(total_inc - total_exp):,.0f} Ks</b>\n\n"
     
-    stock_added_value = 0
-    stock_removed_value = 0
-    for action, qty, buy_price in logs:
-        if action in ['buy', 'old_stock', 'return_lend', 'borrow']:
-            stock_added_value += (qty * buy_price)
-        elif action in ['sell', 'damage', 'lend', 'return_borrow']:
-            stock_removed_value += (qty * buy_price)
+    tz = pytz.timezone('Asia/Yangon')
+    if yyyy_mm == datetime.now(tz).strftime('%Y-%m'):
+        cursor.execute("SELECT quantity, rented_out, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
+        inv_rows = cursor.fetchall()
+        ending_stock_val = 0
+        for qty, r_out, r_in, price in inv_rows:
+            r_out = r_out or 0
+            r_in = r_in or 0
+            ending_stock_val += (qty + r_out - r_in) * price
             
-    # Net Stock Change
-    net_stock_change = stock_added_value - stock_removed_value
-    beginning_stock_val = ending_stock_val - net_stock_change
-    
-    # Net Profit Calculation
-    net_profit = (total_inc - total_exp) + (ending_stock_val - beginning_stock_val)
-    
+        cursor.execute("""
+            SELECT s.action_type, s.qty, i.buy_price
+            FROM stock_logs s
+            JOIN inventory i ON s.item_name = i.item_name AND s.user_id = i.user_id
+            WHERE s.user_id=? AND strftime('%Y-%m', s.date) = ?
+        """, (user_id, yyyy_mm))
+        logs = cursor.fetchall()
+        
+        stock_added_value = 0
+        stock_removed_value = 0
+        for action, qty, buy_price in logs:
+            if action in ['buy', 'old_stock', 'return_lend', 'borrow']:
+                stock_added_value += (qty * buy_price)
+            elif action in ['sell', 'damage', 'lend', 'return_borrow']:
+                stock_removed_value += (qty * buy_price)
+                
+        net_stock_change = stock_added_value - stock_removed_value
+        beginning_stock_val = ending_stock_val - net_stock_change
+        net_profit = (total_inc - total_exp) + (ending_stock_val - beginning_stock_val)
+        
+        text += "📦 <b>Stock ပြောင်းလဲမှု (Inventory P&L)</b>\n"
+        text += f"▪️ လအစ Stock တန်ဖိုး (ခန့်မှန်း): {beginning_stock_val:,.0f} Ks\n"
+        text += f"▪️ နောက်ဆုံးလက်ကျန် Stock တန်ဖိုး: {ending_stock_val:,.0f} Ks\n"
+        
+        symbol = "📈 အမြတ်" if net_profit >= 0 else "📉 အရှုံး"
+        text += "=========================\n"
+        text += f"🏆 <b>စုစုပေါင်း {symbol} (Net Profit): {net_profit:,.0f} Ks</b>\n"
+        text += "<i>(တွက်ချက်ပုံ: ဝင်ငွေ-ထွက်ငွေ + (နောက်ဆုံးStock-လအစStock))</i>\n"
+        
     conn.close()
     
-    text = "🗓 <b>ဒီလ ဘဏ္ဍာရေး အစီရင်ခံစာ နှင့် အရှုံးအမြတ်တွက်ချက်မှု</b>\n=========================\n\n"
-    text += f"🟢 <b>ဒီလ ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n"
-    text += f"🔴 <b>ဒီလ ထွက်ငွေစုစုပေါင်း (အသုံးစရိတ်/အဝယ်):</b> {total_exp:,.0f} Ks\n"
-    text += f"💵 <b>ဒီလ ငွေသားရရှိမှု (Cash Flow):</b> {(total_inc - total_exp):,.0f} Ks\n\n"
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton(f"📑 {yyyy_mm} အသေးစိတ်ကြည့်မည်", callback_data=f"month_details_{yyyy_mm}"))
+    markup.add(types.InlineKeyboardButton("📅 အခြားလများ ရွေးချယ်ရန်", callback_data="select_month"))
     
-    text += "📦 <b>Stock ပြောင်းလဲမှု (Inventory P&L)</b>\n"
-    text += f"▪️ လအစ Stock တန်ဖိုး (ခန့်မှန်း): {beginning_stock_val:,.0f} Ks\n"
-    text += f"▪️ နောက်ဆုံးလက်ကျန် Stock တန်ဖိုး: {ending_stock_val:,.0f} Ks\n"
+    if message_id: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=markup)
+    else: bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+
+
+def generate_year_report(chat_id, user_id, yyyy, message_id=None):
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
     
-    symbol = "📈 အမြတ်" if net_profit >= 0 else "📉 အရှုံး"
-    text += "=========================\n"
-    text += f"🏆 <b>စုစုပေါင်း {symbol} (Net Profit): {net_profit:,.0f} Ks</b>\n"
-    text += "<i>(တွက်ချက်ပုံ: ဝင်ငွေ - ထွက်ငွေ + (နောက်ဆုံးStock - လအစStock))</i>\n"
+    cursor.execute("SELECT strftime('%m', date), SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y', date) = ? GROUP BY strftime('%m', date) ORDER BY strftime('%m', date)", (user_id, yyyy))
+    monthly_data = cursor.fetchall()
+    
+    cursor.execute("SELECT SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y', date) = ?", (user_id, yyyy))
+    total_inc, total_exp = cursor.fetchone()
+    total_inc, total_exp = total_inc or 0.0, total_exp or 0.0
+    
+    cursor.execute("SELECT note, SUM(amount) FROM transactions WHERE user_id=? AND type='income' AND strftime('%Y', date) = ? GROUP BY note ORDER BY SUM(amount) DESC LIMIT 15", (user_id, yyyy))
+    incomes = cursor.fetchall()
+    
+    cursor.execute("SELECT note, SUM(amount) FROM transactions WHERE user_id=? AND type='expense' AND strftime('%Y', date) = ? GROUP BY note ORDER BY SUM(amount) DESC LIMIT 15", (user_id, yyyy))
+    expenses = cursor.fetchall()
+    conn.close()
+    
+    text = f"🗓 <b>{yyyy} ခုနှစ် ဘဏ္ဍာရေး အစီရင်ခံစာ (နှစ်ချုပ်)</b>\n=========================\n\n"
+    if monthly_data:
+        for month, m_inc, m_exp in monthly_data:
+            m_inc, m_exp = m_inc or 0.0, m_exp or 0.0
+            text += f"📅 <b>လ - {month}</b>:\n   🟢 ဝင်ငွေ: +{m_inc:,.0f} | 🔴 ထွက်ငွေ: -{m_exp:,.0f}\n"
+    text += "\n"
+    
+    text += f"🟢 <b>ထိပ်တန်း ဝင်ငွေခေါင်းစဉ်များ:</b>\n"
+    if incomes:
+        for note, amt in incomes: text += f"▪️ {note}: {amt:,.0f} Ks\n"
+    else: text += "မရှိပါ\n"
+    
+    text += f"\n🔴 <b>ထိပ်တန်း ထွက်ငွေခေါင်းစဉ်များ:</b>\n"
+    if expenses:
+        for note, amt in expenses: text += f"▪️ {note}: {amt:,.0f} Ks\n"
+    else: text += "မရှိပါ\n"
+    
+    text += "\n=========================\n"
+    text += f"🟢 <b>{yyyy} နှစ် ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n"
+    text += f"🔴 <b>{yyyy} နှစ် ထွက်ငွေစုစုပေါင်း:</b> {total_exp:,.0f} Ks\n"
+    text += f"💵 <b>{yyyy} နှစ် ပိုငွေ/လက်ကျန်:</b> {(total_inc - total_exp):,.0f} Ks\n"
     
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📑 ဒီလအတွင်း အသေးစိတ်မှတ်တမ်းများကြည့်မည်", callback_data="month_details"))
+    markup.add(types.InlineKeyboardButton(f"📑 {yyyy} နှစ်ချုပ် အသေးစိတ်ကြည့်မည်", callback_data=f"year_details_{yyyy}"))
+    markup.add(types.InlineKeyboardButton("📅 အခြားနှစ်များ ရွေးချယ်ရန်", callback_data="select_year"))
     
-    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+    if message_id: bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=markup)
+    else: bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data == "month_details")
+
+@bot.message_handler(func=lambda m: m.text == "🗓 ဒီလစာရင်း")
+def show_month_report_init(message):
+    tz = pytz.timezone('Asia/Yangon')
+    current_month = datetime.now(tz).strftime('%Y-%m')
+    generate_month_report(message.chat.id, message.from_user.id, current_month)
+
+@bot.message_handler(func=lambda m: m.text == "🗓 ဒီနှစ်စာရင်း")
+def show_year_report_init(message):
+    tz = pytz.timezone('Asia/Yangon')
+    current_year = datetime.now(tz).strftime('%Y')
+    generate_year_report(message.chat.id, message.from_user.id, current_year)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "select_month")
+def handle_select_month(call):
+    answer_cb(call.id)
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT strftime('%Y-%m', date) FROM transactions WHERE user_id=? ORDER BY 1 DESC", (call.from_user.id,))
+    months = [r[0] for r in cursor.fetchall() if r[0]]
+    conn.close()
+    
+    if not months:
+        bot.send_message(call.message.chat.id, "ရွေးချယ်ရန် လများ မရှိသေးပါ။")
+        return
+        
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    buttons = [types.InlineKeyboardButton(m, callback_data=f"month_report_{m}") for m in months]
+    markup.add(*buttons)
+    bot.edit_message_text("📅 <b>ကြည့်ရှုလိုသော လကို ရွေးချယ်ပါ</b>", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == "select_year")
+def handle_select_year(call):
+    answer_cb(call.id)
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT strftime('%Y', date) FROM transactions WHERE user_id=? ORDER BY 1 DESC", (call.from_user.id,))
+    years = [r[0] for r in cursor.fetchall() if r[0]]
+    conn.close()
+    
+    if not years:
+        bot.send_message(call.message.chat.id, "ရွေးချယ်ရန် နှစ်များ မရှိသေးပါ။")
+        return
+        
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    buttons = [types.InlineKeyboardButton(y, callback_data=f"year_report_{y}") for y in years]
+    markup.add(*buttons)
+    bot.edit_message_text("📅 <b>ကြည့်ရှုလိုသော နှစ်ကို ရွေးချယ်ပါ</b>", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=markup)
+    
+@bot.callback_query_handler(func=lambda call: call.data.startswith("month_report_"))
+def process_month_report(call):
+    answer_cb(call.id)
+    yyyy_mm = call.data.split("_")[2]
+    generate_month_report(call.message.chat.id, call.from_user.id, yyyy_mm, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("year_report_"))
+def process_year_report(call):
+    answer_cb(call.id)
+    yyyy = call.data.split("_")[2]
+    generate_year_report(call.message.chat.id, call.from_user.id, yyyy, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("month_details_"))
 def show_month_details(call):
     answer_cb(call.id)
+    yyyy_mm = call.data.split("_")[2]
     user_id = call.from_user.id
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT type, amount, note, strftime('%Y-%m-%d %H:%M', date) FROM transactions WHERE user_id=? AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') ORDER BY date ASC", (user_id,))
+    cursor.execute("SELECT type, amount, note, strftime('%Y-%m-%d %H:%M', date) FROM transactions WHERE user_id=? AND strftime('%Y-%m', date) = ? ORDER BY date ASC", (user_id, yyyy_mm))
     rows = cursor.fetchall()
     conn.close()
     
     if not rows:
-        bot.send_message(call.message.chat.id, "ဒီလအတွက် မှတ်တမ်းအသေးစိတ် မရှိသေးပါ။")
+        bot.send_message(call.message.chat.id, f"{yyyy_mm} လအတွက် မှတ်တမ်းအသေးစိတ် မရှိသေးပါ။")
         return
         
-    text = "📑 <b>ဒီလအတွင်း ငွေကြေးအဝင်အထွက် အသေးစိတ်</b>\n\n"
+    text = f"📑 <b>{yyyy_mm} လအတွင်း ငွေကြေးအဝင်အထွက် အသေးစိတ်</b>\n\n"
     for r in rows:
         t_type, amount, note, date = r
         symbol = "🟢 +" if t_type == 'income' else "🔴 -"
@@ -1009,32 +1134,38 @@ def show_month_details(call):
     if text:
         bot.send_message(call.message.chat.id, text, parse_mode="HTML")
 
-@bot.message_handler(func=lambda m: m.text == "🗓 ဒီနှစ်စာရင်း")
-def show_year_report(message):
-    user_id = message.from_user.id
+@bot.callback_query_handler(func=lambda call: call.data.startswith("year_details_"))
+def show_year_details(call):
+    answer_cb(call.id)
+    yyyy = call.data.split("_")[2]
+    user_id = call.from_user.id
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT strftime('%m', date), SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y', date) = strftime('%Y', 'now', 'localtime') GROUP BY strftime('%m', date) ORDER BY strftime('%m', date)", (user_id,))
-    monthly_data = cursor.fetchall()
-    cursor.execute("SELECT SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y', date) = strftime('%Y', 'now', 'localtime')", (user_id,))
-    total_inc, total_exp = cursor.fetchone()
+    # Group by month and note for detailed yearly view
+    cursor.execute("SELECT strftime('%m', date), type, note, SUM(amount) FROM transactions WHERE user_id=? AND strftime('%Y', date) = ? GROUP BY strftime('%m', date), type, note ORDER BY strftime('%m', date) ASC, type ASC", (user_id, yyyy))
+    rows = cursor.fetchall()
     conn.close()
     
-    total_inc, total_exp = total_inc or 0.0, total_exp or 0.0
-    
-    if not monthly_data:
-        bot.send_message(message.chat.id, "🗓 ဤနှစ်အတွက် မှတ်တမ်း မရှိသေးပါ။")
+    if not rows:
+        bot.send_message(call.message.chat.id, f"{yyyy} ခုနှစ်အတွက် မှတ်တမ်းအသေးစိတ် မရှိသေးပါ။")
         return
         
-    text = "🗓 <b>ဒီနှစ် ဘဏ္ဍာရေး အစီရင်ခံစာ (နှစ်ချုပ်)</b>\n=========================\n\n"
-    for month, m_inc, m_exp in monthly_data:
-        m_inc, m_exp = m_inc or 0.0, m_exp or 0.0
-        text += f"📅 <b>လ - {month}</b>:\n   🟢 ဝင်ငွေ: +{m_inc:,.0f}\n   🔴 ထွက်ငွေ: -{m_exp:,.0f}\n\n"
+    text = f"📑 <b>{yyyy} ခုနှစ်အတွက် လအလိုက် အသေးစိတ်အချက်အလက်များ</b>\n(တူညီသော ခေါင်းစဉ်များကို ပေါင်းပြထားပါသည်)\n\n"
+    current_month = ""
+    for r in rows:
+        month, t_type, note, amount = r
+        if month != current_month:
+            text += f"\n📅 <b>{month} လ</b>\n"
+            current_month = month
+        symbol = "🟢" if t_type == 'income' else "🔴"
+        text += f"   {symbol} {note}: {amount:,.0f} Ks\n"
         
-    text += "=========================\n"
-    text += f"🟢 <b>ဒီနှစ် ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n🔴 <b>ဒီနှစ် ထွက်ငွေစုစုပေါင်း:</b> {total_exp:,.0f} Ks\n---------------------------\n"
-    text += f"💵 <b>ဒီနှစ် ပိုငွေ/လက်ကျန်:</b> {(total_inc - total_exp):,.0f} Ks\n"
-    bot.send_message(message.chat.id, text[:4096], parse_mode="HTML")
+        if len(text) > 3800:
+            bot.send_message(call.message.chat.id, text, parse_mode="HTML")
+            text = ""
+    if text.strip():
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML")
+
 
 # ----------------- 💰 စုစုပေါင်းလက်ကျန် (Assets & Liabilities ပါဝင်သည်) -----------------
 @bot.message_handler(func=lambda m: m.text == "💰 စုစုပေါင်းလက်ကျန်")
@@ -1333,7 +1464,7 @@ def send_undo_stock_page(chat_id, user_id, page, message_id=None):
     if message_id: bot.edit_message_text(text=text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode="HTML")
     else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
 
-@bot.message_handler(func=lambda m: m.text == "↩️ မှားသွားလျှင် ပြန်ဖျက်မည်")
+@bot.message_handler(func=lambda m: m.text == "↩️️ မှားသွားလျှင် ပြန်ဖျက်မည်")
 def undo_stock_menu(message):
     send_undo_stock_page(message.chat.id, message.from_user.id, 0)
 
@@ -1382,7 +1513,7 @@ def process_stock_undo(call):
             else:
                 bot.edit_message_text(text="⚠️ မှတ်တမ်း ရှာမတွေ့ပါ။", chat_id=call.message.chat.id, message_id=call.message.message_id)
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"⚠️️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
+        bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
 # ----------------- 👑 ADMIN COMMANDS -----------------
 @bot.message_handler(commands=['admin'])
@@ -1585,5 +1716,5 @@ if __name__ == '__main__':
     except:
         pass
         
-    print("Bot is running perfectly with all new loan features...")
+    print("Bot is running perfectly with Historical Month & Year features...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
