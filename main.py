@@ -120,6 +120,9 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS stock_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, action_type TEXT, item_name TEXT, qty INTEGER, trans_id INTEGER, deli_trans_id INTEGER, date TIMESTAMP DEFAULT (datetime('now', 'localtime')))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS salaries (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, emp_name TEXT, amount REAL, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid')''')
     
+    # ငွေချေး/ငွေပြန်ဆပ် စနစ်အတွက် Table အသစ်
+    cursor.execute('''CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, borrower_name TEXT, principal REAL, interest REAL DEFAULT 0, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid')''')
+    
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
     except: pass
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_in INTEGER DEFAULT 0')
@@ -148,9 +151,7 @@ def is_cancel(message):
         return True
     return False
 
-# ----- Safe Callback Answer Helper -----
 def answer_cb(call_id, text=None):
-    """Network ကြောင့် Callback ပြတ်ကျခြင်းမှ ကာကွယ်ပေးသော Function"""
     try:
         if text:
             bot.answer_callback_query(callback_query_id=call_id, text=text)
@@ -255,6 +256,7 @@ def rent_menu():
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(types.KeyboardButton("📥 အငှားယူမည် (Borrow)"), types.KeyboardButton("📤 အငှားပြန်အပ်မည်"))
     markup.add(types.KeyboardButton("📤 အငှားပေးမည် (Lend)"), types.KeyboardButton("📥 အငှားပြန်ရမည်"))
+    markup.add(types.KeyboardButton("💸 သူများကိုငွေချေးမည်"), types.KeyboardButton("💰 ချေးငွေပြန်ရမည်"))
     markup.add(types.KeyboardButton("🔙 Stock မီနူးသို့"))
     return markup
 
@@ -464,7 +466,6 @@ def process_damage_stock(message):
         bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။", reply_markup=stock_menu())
 
 # ================== အငှားကဏ္ဍ (RENTALS) ==================
-
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပေးမည် (Lend)")
 def ask_lend_stock(message):
     stock_list = get_available_stock_html(message.from_user.id, "quantity > 0")
@@ -648,7 +649,76 @@ def process_return_borrowed(message):
         if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
         bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
+
+# ----------------- 💸 ငွေချေး / ပြန်ဆပ် စနစ် -----------------
+@bot.message_handler(func=lambda m: m.text == "💸 သူများကိုငွေချေးမည်")
+def ask_lend_money(message):
+    msg = bot.send_message(message.chat.id, "ချေးငွေယူမည့်သူ၏ နာမည် နှင့် ပမာဏ ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။\nဥပမာ: <code>ကိုအောင်, 50000</code>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, process_lend_money)
+
+def process_lend_money(message):
+    if is_cancel(message): return
+    try:
+        parts = [p.strip() for p in message.text.split(',')]
+        name, amount = parts[0], float(parts[1])
+        user_id = message.from_user.id
+        
+        conn = sqlite3.connect('accounting.db')
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO loans (user_id, borrower_name, principal) VALUES (?, ?, ?)", (user_id, name, amount))
+        cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'expense', ?, ?)", (user_id, amount, f"{name} သို့ ငွေချေးခြင်း"))
+        conn.commit()
+        conn.close()
+        
+        bot.send_message(message.chat.id, f"✅ '{name}' သို့ ငွေ {amount:,.0f} Ks ချေးပေးလိုက်ပါပြီ။ (ထွက်ငွေစာရင်းတွင် မှတ်သားပြီးပါပြီ)", reply_markup=rent_menu())
+    except Exception:
+        bot.send_message(message.chat.id, "⚠️ Format မှားနေပါသည်။ ဥပမာ: ကိုအောင်, 50000", reply_markup=rent_menu())
+
+@bot.message_handler(func=lambda m: m.text == "💰 ချေးငွေပြန်ရမည်")
+def ask_receive_money(message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT borrower_name, SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' GROUP BY borrower_name", (user_id,))
+    unpaid_loans = cursor.fetchall()
+    conn.close()
+    
+    text = "💰 <b>ရရန်ကျန်သော ချေးငွေများ:</b>\n"
+    if unpaid_loans:
+        for name, amt in unpaid_loans:
+            text += f"▪️ {name}: {amt:,.0f} Ks\n"
+    else:
+        text += "ရရန်ကျန်ငွေ မရှိသေးပါ။\n"
+        
+    text += "\nငွေပြန်ဆပ်မည့်သူနာမည်၊ အရင်းပမာဏ၊ အတိုးရငွေ ကို ကော်မာ (,) ခြား၍ ရိုက်ပါ။ (အတိုးမယူပါက 0 ဟုထည့်ပါ)\nဥပမာ: <code>ကိုအောင်, 50000, 2000</code>"
+    msg = bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, process_receive_money)
+
+def process_receive_money(message):
+    if is_cancel(message): return
+    try:
+        parts = [p.strip() for p in message.text.split(',')]
+        name = parts[0]
+        principal = float(parts[1])
+        interest = float(parts[2]) if len(parts) > 2 else 0.0
+        user_id = message.from_user.id
+        
+        conn = sqlite3.connect('accounting.db')
+        cursor = conn.cursor()
+        
+        cursor.execute("UPDATE loans SET status='paid' WHERE user_id=? AND borrower_name=? AND status='unpaid'", (user_id, name))
+        
+        total_received = principal + interest
+        note = f"{name} ထံမှ ချေးငွေပြန်ရ (အရင်း: {principal:,.0f} + အတိုး: {interest:,.0f})"
+        cursor.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, 'income', ?, ?)", (user_id, total_received, note))
+        
+        conn.commit()
+        conn.close()
+        
+        bot.send_message(message.chat.id, f"✅ '{name}' ထံမှ ငွေ {total_received:,.0f} Ks ပြန်လည်လက်ခံရရှိပါပြီ။ (ဝင်ငွေစာရင်းတွင် မှတ်သားပြီးပါပြီ)", reply_markup=rent_menu())
+    except Exception:
+        bot.send_message(message.chat.id, "⚠️ Format မှားနေပါသည်။ ဥပမာ: ကိုအောင်, 50000, 2000", reply_markup=rent_menu())
 
 # ----------------- 📊 Stock Valuation (Pagination ဖြင့်) -----------------
 def get_stock_val_page(user_id, page):
@@ -744,35 +814,99 @@ def show_today_report(message):
     text += f"---------------------------\n🟢 ဝင်ငွေ: {total_inc:,.0f} Ks\n🔴 ထွက်ငွေ: {total_exp:,.0f} Ks\n⚖️ လက်ကျန်: {(total_inc - total_exp):,.0f} Ks"
     bot.send_message(message.chat.id, text)
 
+# ----------------- 🗓 ဒီလစာရင်း (အသေးစိတ် + အရှုံးအမြတ်တွက်ချက်ခြင်း) -----------------
 @bot.message_handler(func=lambda m: m.text == "🗓 ဒီလစာရင်း")
 def show_month_report(message):
     user_id = message.from_user.id
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT note, SUM(amount) FROM transactions WHERE user_id=? AND type='income' AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') GROUP BY note ORDER BY SUM(amount) DESC", (user_id,))
-    incomes = cursor.fetchall()
-    cursor.execute("SELECT note, SUM(amount) FROM transactions WHERE user_id=? AND type='expense' AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') GROUP BY note ORDER BY SUM(amount) DESC", (user_id,))
-    expenses = cursor.fetchall()
+    
+    # ဒီလ ဝင်ငွေ ထွက်ငွေ
     cursor.execute("SELECT SUM(CASE WHEN type='income' THEN amount ELSE 0 END), SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) FROM transactions WHERE user_id=? AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime')", (user_id,))
     total_inc, total_exp = cursor.fetchone()
+    total_inc = total_inc or 0.0
+    total_exp = total_exp or 0.0
+    
+    # ယခု လက်ရှိ Stock တန်ဖိုး (Ending Stock)
+    cursor.execute("SELECT quantity, rented_out, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
+    inv_rows = cursor.fetchall()
+    ending_stock_val = 0
+    for qty, r_out, r_in, price in inv_rows:
+        r_out = r_out or 0
+        r_in = r_in or 0
+        ending_stock_val += (qty + r_out - r_in) * price
+        
+    # လအစ Stock ကို တွက်ချက်ရန်
+    cursor.execute("""
+        SELECT s.action_type, s.qty, i.buy_price
+        FROM stock_logs s
+        JOIN inventory i ON s.item_name = i.item_name AND s.user_id = i.user_id
+        WHERE s.user_id=? AND strftime('%Y-%m', s.date) = strftime('%Y-%m', 'now', 'localtime')
+    """, (user_id,))
+    logs = cursor.fetchall()
+    
+    stock_added_value = 0
+    stock_removed_value = 0
+    for action, qty, buy_price in logs:
+        if action in ['buy', 'old_stock', 'return_lend', 'borrow']:
+            stock_added_value += (qty * buy_price)
+        elif action in ['sell', 'damage', 'lend', 'return_borrow']:
+            stock_removed_value += (qty * buy_price)
+            
+    # Net Stock Change
+    net_stock_change = stock_added_value - stock_removed_value
+    beginning_stock_val = ending_stock_val - net_stock_change
+    
+    # Net Profit Calculation
+    net_profit = (total_inc - total_exp) + (ending_stock_val - beginning_stock_val)
+    
     conn.close()
     
-    total_inc, total_exp = total_inc or 0.0, total_exp or 0.0
+    text = "🗓 <b>ဒီလ ဘဏ္ဍာရေး အစီရင်ခံစာ နှင့် အရှုံးအမြတ်တွက်ချက်မှု</b>\n=========================\n\n"
+    text += f"🟢 <b>ဒီလ ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n"
+    text += f"🔴 <b>ဒီလ ထွက်ငွေစုစုပေါင်း (အသုံးစရိတ်/အဝယ်):</b> {total_exp:,.0f} Ks\n"
+    text += f"💵 <b>ဒီလ ငွေသားရရှိမှု (Cash Flow):</b> {(total_inc - total_exp):,.0f} Ks\n\n"
     
-    text = "🗓 <b>ဒီလ ဘဏ္ဍာရေး အစီရင်ခံစာ (အကျဉ်းချုပ်)</b>\n=========================\n\n"
-    if incomes:
-        text += "🟢 <b>ဝင်ငွေ ခေါင်းစဉ်များ:</b>\n"
-        for note, amt in incomes: text += f"▪️ {note}: {amt:,.0f} Ks\n"
-        text += "\n"
-    if expenses:
-        text += "🔴 <b>ထွက်ငွေ ခေါင်းစဉ်များ:</b>\n"
-        for note, amt in expenses: text += f"▪️ {note}: {amt:,.0f} Ks\n"
-        text += "\n"
-        
+    text += "📦 <b>Stock ပြောင်းလဲမှု (Inventory P&L)</b>\n"
+    text += f"▪️ လအစ Stock တန်ဖိုး (ခန့်မှန်း): {beginning_stock_val:,.0f} Ks\n"
+    text += f"▪️ နောက်ဆုံးလက်ကျန် Stock တန်ဖိုး: {ending_stock_val:,.0f} Ks\n"
+    
+    symbol = "📈 အမြတ်" if net_profit >= 0 else "📉 အရှုံး"
     text += "=========================\n"
-    text += f"🟢 <b>ဒီလ ဝင်ငွေစုစုပေါင်း:</b> {total_inc:,.0f} Ks\n🔴 <b>ဒီလ ထွက်ငွေစုစုပေါင်း:</b> {total_exp:,.0f} Ks\n---------------------------\n"
-    text += f"💵 <b>ဒီလ ပိုငွေ/လက်ကျန်:</b> {(total_inc - total_exp):,.0f} Ks\n📦 <b>လက်ရှိ Stock တန်ဖိုး:</b> {get_total_stock_value(user_id):,.0f} Ks\n"
-    bot.send_message(message.chat.id, text[:4096], parse_mode="HTML")
+    text += f"🏆 <b>စုစုပေါင်း {symbol} (Net Profit): {net_profit:,.0f} Ks</b>\n"
+    text += "<i>(တွက်ချက်ပုံ: ဝင်ငွေ - ထွက်ငွေ + (နောက်ဆုံးStock - လအစStock))</i>\n"
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📑 ဒီလအတွင်း အသေးစိတ်မှတ်တမ်းများကြည့်မည်", callback_data="month_details"))
+    
+    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == "month_details")
+def show_month_details(call):
+    answer_cb(call.id)
+    user_id = call.from_user.id
+    conn = sqlite3.connect('accounting.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT type, amount, note, strftime('%Y-%m-%d %H:%M', date) FROM transactions WHERE user_id=? AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') ORDER BY date ASC", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        bot.send_message(call.message.chat.id, "ဒီလအတွက် မှတ်တမ်းအသေးစိတ် မရှိသေးပါ။")
+        return
+        
+    text = "📑 <b>ဒီလအတွင်း ငွေကြေးအဝင်အထွက် အသေးစိတ်</b>\n\n"
+    for r in rows:
+        t_type, amount, note, date = r
+        symbol = "🟢 +" if t_type == 'income' else "🔴 -"
+        text += f"▪️ {date} | {symbol}{amount:,.0f} Ks ({note})\n"
+        
+        if len(text) > 3800:
+            bot.send_message(call.message.chat.id, text, parse_mode="HTML")
+            text = ""
+            
+    if text:
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: m.text == "🗓 ဒီနှစ်စာရင်း")
 def show_year_report(message):
@@ -852,7 +986,7 @@ def log_wage(message):
         conn.close()
         bot.reply_to(message, f"✅ '{name}' အတွက် လုပ်အားခ {amount:,.0f} Ks ကို မှတ်သားထားပါပြီ။")
     except Exception:
-        bot.reply_to(message, "⚠️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/wage Ko Ko 50000</code>", parse_mode="HTML")
+        bot.reply_to(message, "⚠️️ အသုံးပြုနည်း မှားယွင်းနေပါသည်။\nဥပမာ: <code>/wage Ko Ko 50000</code>", parse_mode="HTML")
 
 @bot.message_handler(commands=['wages'])
 def check_wages(message):
@@ -1049,7 +1183,7 @@ def process_delete(call):
             conn.commit()
         bot.edit_message_text(text="✅ ရွေးချယ်ထားသော စာရင်းကို ဖျက်လိုက်ပါပြီ။", chat_id=call.message.chat.id, message_id=call.message.message_id)
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
+        bot.send_message(call.message.chat.id, f"⚠️️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
 # ----------------- ↩️ မှားသွားလျှင် ပြန်ဖျက်မည် Stock Undo (Pagination) -----------------
 def send_undo_stock_page(chat_id, user_id, page, message_id=None):
@@ -1139,10 +1273,11 @@ def process_stock_undo(call):
 def admin_panel_help(message):
     if message.from_user.id in ADMIN_IDS:
         text = (
-            "👑 <b>Admin Commands List</b> 👑\n\n"
-            "📢 <b>Broadcast:</b>\n<code>/broadcast [စာသား]</code>\n\n"
-            "💾 <b>DB Manual Backup:</b>\n<code>/adminbackup</code>\n\n"
-            "♻️ <b>DB Database Restore:</b>\n<code>/adminrestore</code>"
+            "👑 <b>Admin Panel (စနစ်ထိန်းချုပ်မှု)</b> 👑\n\n"
+            "📢 <b>User အားလုံးထံ စာပို့ရန်:</b>\n<code>/broadcast [စာသား]</code>\n\n"
+            "💾 <b>Database ဖိုင် တိုက်ရိုက်ယူရန်:</b>\n<code>/adminbackup</code>\n\n"
+            "♻️ <b>Database ဖိုင် အဟောင်းပြန်သွင်းရန်:</b>\n<code>/adminrestore</code>\n\n"
+            "<i>(မှတ်ချက် - ယခု Command များကို Admin ID ရှိသူသာ အသုံးပြုနိုင်ပါသည်။)</i>"
         )
         bot.send_message(message.chat.id, text, parse_mode="HTML")
     else:
@@ -1153,7 +1288,7 @@ def admin_broadcast(message):
     if message.from_user.id not in ADMIN_IDS: return
     text = message.text.replace('/broadcast', '').strip()
     if not text:
-        bot.reply_to(message, "ပေးပို့လိုသော စာသားကို ရိုက်ထည့်ပါ။")
+        bot.reply_to(message, "⚠️ ပေးပို့လိုသော စာသားကို ရိုက်ထည့်ပါ။\nဥပမာ: /broadcast မနက်ဖြန် Bot ခဏနားပါမည်။")
         return
     bot.send_message(message.chat.id, "⏳ Broadcast ပေးပို့နေပါသည်...")
     conn = sqlite3.connect('accounting.db')
@@ -1167,7 +1302,7 @@ def admin_broadcast(message):
             bot.send_message(u[0], f"📢 <b>Admin Announcement:</b>\n\n{text}", parse_mode="HTML")
             success += 1
         except: failed += 1
-    bot.reply_to(message, f"✅ အောင်မြင်: {success}\n❌ မရသူ: {failed}")
+    bot.reply_to(message, f"✅ အောင်မြင်: {success} ဦး\n❌ မရသူ: {failed} ဦး")
 
 @bot.message_handler(commands=['adminbackup'])
 def admin_manual_backup(message):
@@ -1329,10 +1464,10 @@ if __name__ == '__main__':
     
     try:
         bot.remove_webhook()
-        time.sleep(1) # Webhook သေချာပြုတ်ရန် အနည်းငယ်စောင့်ခြင်း
+        time.sleep(1) 
         print("Webhook removed automatically to prevent Error 409.")
     except:
         pass
         
-    print("Bot is running perfectly with MongoDB Cloud Sync & Safe Callbacks...")
+    print("Bot is running perfectly with all new features...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
