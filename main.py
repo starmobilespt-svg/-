@@ -119,6 +119,8 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_name TEXT, quantity INTEGER DEFAULT 0, buy_price REAL DEFAULT 0, sell_price REAL DEFAULT 0, rented_out INTEGER DEFAULT 0, rented_in INTEGER DEFAULT 0)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS stock_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, action_type TEXT, item_name TEXT, qty INTEGER, trans_id INTEGER, deli_trans_id INTEGER, date TIMESTAMP DEFAULT (datetime('now', 'localtime')))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS salaries (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, emp_name TEXT, amount REAL, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid')''')
+    
+    # ငွေချေး/ငွေပြန်ဆပ် စနစ်အတွက် Table အသစ်
     cursor.execute('''CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, borrower_name TEXT, principal REAL, interest REAL DEFAULT 0, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid', loan_type TEXT DEFAULT 'lend')''')
     
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
@@ -219,18 +221,16 @@ def get_available_stock_html(user_id, condition="quantity > 0"):
     return text + "\n"
 
 def get_total_stock_value(user_id):
+    """ငှားထားသည်များကို မတွက်ဘဲ လက်ရှိဆိုင်ရှိလက်ကျန်(quantity) သီးသန့်ကိုသာ တန်ဖိုးတွက်မည်"""
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT quantity, rented_out, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT quantity, buy_price FROM inventory WHERE user_id=?", (user_id,))
     rows = cursor.fetchall()
     conn.close()
     
     total_val = 0
-    for qty, r_out, r_in, price in rows:
-        r_out = r_out or 0
-        r_in = r_in or 0
-        owned_qty = qty + r_out - r_in
-        total_val += owned_qty * price
+    for qty, price in rows:
+        total_val += qty * price
     return total_val
 
 # ----------------- Menus -----------------
@@ -833,11 +833,9 @@ def get_stock_val_page(user_id, page):
         return None, 0, 0
         
     grand_total_value = 0
+    # ငှားထားသည်များကို မတွက်ဘဲ quantity (လက်ကျန်သီးသန့်) ဖြင့်သာ တွက်သည်
     for _, qty, r_out, r_in, price in all_rows:
-        r_out = r_out or 0
-        r_in = r_in or 0
-        owned_qty = qty + r_out - r_in
-        grand_total_value += owned_qty * price
+        grand_total_value += qty * price
         
     per_page = 5
     total_pages = (total_items + per_page - 1) // per_page
@@ -851,18 +849,17 @@ def get_stock_val_page(user_id, page):
         name, qty, r_out, r_in, buy_price = r
         r_out = r_out or 0
         r_in = r_in or 0
-        owned_total = qty + r_out - r_in 
-        item_value = owned_total * buy_price
+        item_value = qty * buy_price
         
         if qty > 0 or r_out > 0 or r_in > 0:
             text += f"🏷 <b>{name}</b>\n"
             text += f"   📦 လက်ကျန်: {qty} ခု\n"
             if r_out > 0: text += f"   📤 သူများကိုငှားထား: {r_out} ခု\n"
             if r_in > 0: text += f"   📥 သူများဆီမှငှားထား: {r_in} ခု\n"
-            text += f"   💰 တန်ဖိုး: {owned_total} x {buy_price:,.0f} = <b>{item_value:,.0f} Ks</b>\n\n"
+            text += f"   💰 တန်ဖိုး (လက်ကျန်): {qty} x {buy_price:,.0f} = <b>{item_value:,.0f} Ks</b>\n\n"
         
     text += f"=========================\n"
-    text += f"🏆 <b>စုစုပေါင်း Stock တန်ဖိုး: {grand_total_value:,.0f} Ks</b>"
+    text += f"🏆 <b>စုစုပေါင်း Stock တန်ဖိုး (လက်ကျန်သာ): {grand_total_value:,.0f} Ks</b>"
     return text, total_pages, grand_total_value
 
 def send_stock_val_page(chat_id, user_id, page, message_id=None):
@@ -950,13 +947,11 @@ def generate_month_report(chat_id, user_id, yyyy_mm, message_id=None):
     
     tz = pytz.timezone('Asia/Yangon')
     if yyyy_mm == datetime.now(tz).strftime('%Y-%m'):
-        cursor.execute("SELECT quantity, rented_out, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
+        cursor.execute("SELECT quantity, buy_price FROM inventory WHERE user_id=?", (user_id,))
         inv_rows = cursor.fetchall()
         ending_stock_val = 0
-        for qty, r_out, r_in, price in inv_rows:
-            r_out = r_out or 0
-            r_in = r_in or 0
-            ending_stock_val += (qty + r_out - r_in) * price
+        for qty, price in inv_rows:
+            ending_stock_val += qty * price # လက်ကျန်သီးသန့်ဖြင့်တွက်သည်
             
         cursor.execute("""
             SELECT s.action_type, s.qty, i.buy_price
@@ -1307,7 +1302,7 @@ def view_wage_log(message):
         for r in rows:
             amt, date_str, status = r[0], r[1].split()[0], r[2]
             if amt < 0:
-                text += f"▪️ {date_str} : ရှင်းပေးငွေ/ထုတ်ငွေ {-amt:,.0f} Ks (✅)\n"
+                text += f"▪️️ {date_str} : ရှင်းပေးငွေ/ထုတ်ငွေ {-amt:,.0f} Ks (✅)\n"
             else:
                 status_icon = "✅" if status == 'paid' else "⏳"
                 text += f"▪️ {date_str} : {amt:,.0f} Ks ({status_icon})\n"
@@ -1460,7 +1455,7 @@ def process_delete(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
-# ----------------- ↩️ မှားသွားလျှင် ပြန်ဖျက်မည် Stock Undo (Pagination) -----------------
+# ----------------- ↩️️ မှားသွားလျှင် ပြန်ဖျက်မည် Stock Undo (Pagination) -----------------
 def send_undo_stock_page(chat_id, user_id, page, message_id=None):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
@@ -1543,13 +1538,14 @@ def process_stock_undo(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
-# ----------------- 👑 ADMIN COMMANDS -----------------
+
+# ----------------- 📢 BROADCAST (ကြေညာချက်စနစ် - ပုံ/ဗီဒီယို/ဖိုင် ပါဝင်သည်) -----------------
 @bot.message_handler(commands=['admin'])
 def admin_panel_help(message):
     if message.from_user.id in ADMIN_IDS:
         text = (
             "👑 <b>Admin Panel (စနစ်ထိန်းချုပ်မှု)</b> 👑\n\n"
-            "📢 <b>User အားလုံးထံ စာပို့ရန်:</b>\n<code>/broadcast [စာသား]</code>\n\n"
+            "📢 <b>User အားလုံးထံ စာပို့ရန်:</b>\n<code>/broadcast</code>\n\n"
             "💾 <b>Database ဖိုင် တိုက်ရိုက်ယူရန်:</b>\n<code>/adminbackup</code>\n\n"
             "♻️ <b>Database ဖိုင် အဟောင်းပြန်သွင်းရန်:</b>\n<code>/adminrestore</code>\n\n"
             "<i>(မှတ်ချက် - ယခု Command များကို Admin ID ရှိသူသာ အသုံးပြုနိုင်ပါသည်။)</i>"
@@ -1559,25 +1555,48 @@ def admin_panel_help(message):
         bot.send_message(message.chat.id, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။")
 
 @bot.message_handler(commands=['broadcast'])
-def admin_broadcast(message):
+def admin_broadcast_start(message):
     if message.from_user.id not in ADMIN_IDS: return
+    
+    # စာသားတန်းပါလာလျှင် (ဥပမာ - /broadcast မင်္ဂလာပါ) တန်းပို့မည်
     text = message.text.replace('/broadcast', '').strip()
-    if not text:
-        bot.reply_to(message, "⚠️ ပေးပို့လိုသော စာသားကို ရိုက်ထည့်ပါ။\nဥပမာ: /broadcast မနက်ဖြန် Bot ခဏနားပါမည်။")
+    if text:
+        send_broadcast(message, text_only=text)
+    else:
+        # ဘာမှမပါလျှင် ပုံ/စာသား ကို တောင်းမည်
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add("❌ မလုပ်တော့ပါ (Cancel)")
+        msg = bot.send_message(message.chat.id, "📢 <b>User အားလုံးထံ ကြေညာချက်ပေးပို့ခြင်း</b>\n\nပေးပို့လိုသော စာသား၊ ပုံ (Photo)၊ သို့မဟုတ် ဗီဒီယို (Video) ကို ယခု ပေးပို့ပါ။\n(စာသားများကို Format အလှဆင်၍လည်း ပေးပို့နိုင်ပါသည်။)", parse_mode="HTML", reply_markup=markup)
+        bot.register_next_step_handler(msg, process_broadcast)
+
+def process_broadcast(message):
+    if message.text == "❌ မလုပ်တော့ပါ (Cancel)":
+        bot.send_message(message.chat.id, "လုပ်ဆောင်ချက် ရပ်ဆိုင်းလိုက်ပါပြီ။", reply_markup=main_menu())
         return
-    bot.send_message(message.chat.id, "⏳ Broadcast ပေးပို့နေပါသည်...")
+    send_broadcast(message)
+
+def send_broadcast(message, text_only=None):
+    bot.send_message(message.chat.id, "⏳ Broadcast ပေးပို့နေပါသည်... ခဏစောင့်ပါ။", reply_markup=main_menu())
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT user_id FROM users")
     users = cursor.fetchall()
     conn.close()
+    
     success, failed = 0, 0
     for u in users:
+        user_id = u[0]
         try:
-            bot.send_message(u[0], f"📢 <b>Admin Announcement:</b>\n\n{text}", parse_mode="HTML")
+            if text_only:
+                bot.send_message(user_id, f"📢 <b>Admin Announcement:</b>\n\n{text_only}", parse_mode="HTML")
+            else:
+                # ပုံ၊ ဗီဒီယို၊ ဖိုင် အားလုံးကို Forward Tag မပါဘဲ Copy ကူး၍ ပို့ပေးမည်
+                bot.copy_message(chat_id=user_id, from_chat_id=message.chat.id, message_id=message.message_id)
             success += 1
-        except: failed += 1
-    bot.reply_to(message, f"✅ အောင်မြင်: {success} ဦး\n❌ မရသူ: {failed} ဦး")
+        except Exception as e:
+            failed += 1
+            
+    bot.send_message(message.chat.id, f"✅ <b>Broadcast ပြီးစီးပါပြီ!</b>\n\nအောင်မြင်: {success} ဦး\n❌ မရသူ: {failed} ဦး", parse_mode="HTML")
 
 @bot.message_handler(commands=['adminbackup'])
 def admin_manual_backup(message):
@@ -1744,5 +1763,5 @@ if __name__ == '__main__':
     except:
         pass
         
-    print("Bot is running perfectly with clickable loan names...")
+    print("Bot is running perfectly with Media Broadcast & On-hand Stock Valuation...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
