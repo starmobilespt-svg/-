@@ -119,6 +119,8 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_name TEXT, quantity INTEGER DEFAULT 0, buy_price REAL DEFAULT 0, sell_price REAL DEFAULT 0, rented_out INTEGER DEFAULT 0, rented_in INTEGER DEFAULT 0)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS stock_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, action_type TEXT, item_name TEXT, qty INTEGER, trans_id INTEGER, deli_trans_id INTEGER, date TIMESTAMP DEFAULT (datetime('now', 'localtime')))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS salaries (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, emp_name TEXT, amount REAL, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid')''')
+    
+    # ငွေချေး/ငွေပြန်ဆပ် စနစ်အတွက် Table အသစ်
     cursor.execute('''CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, borrower_name TEXT, principal REAL, interest REAL DEFAULT 0, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid', loan_type TEXT DEFAULT 'lend')''')
     
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
@@ -382,7 +384,7 @@ def process_sell_stock(message):
         
         if not row or row[1] < qty:
             conn.close()
-            bot.send_message(message.chat.id, f"⚠️️ '{name}' အတွက် Stock မလုံလောက်ပါ။", reply_markup=stock_menu())
+            bot.send_message(message.chat.id, f"⚠️ '{name}' အတွက် Stock မလုံလောက်ပါ။", reply_markup=stock_menu())
             return
             
         new_qty = row[1] - qty
@@ -601,7 +603,7 @@ def process_borrow_stock(message):
         if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
         bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3, 2000)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3, 2000)", reply_markup=rent_menu())
 
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပြန်အပ်မည်")
 def ask_return_borrowed(message):
@@ -651,7 +653,7 @@ def process_return_borrowed(message):
         if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
         bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
 
 
 # ----------------- 💸 ငွေချေး / ပြန်ဆပ် စနစ် (Loans) -----------------
@@ -885,12 +887,6 @@ def send_stock_val_page(chat_id, user_id, page, message_id=None):
 def check_stock_value(message):
     send_stock_val_page(message.chat.id, message.from_user.id, 0)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("page_stockval_"))
-def handle_stockval_page(call):
-    answer_cb(call.id)
-    page = int(call.data.split("_")[2])
-    send_stock_val_page(call.message.chat.id, call.from_user.id, page, call.message.message_id)
-
 # ----------------- Reports (အစီရင်ခံစာများ) -----------------
 @bot.message_handler(func=lambda m: m.text == "📅 ဒီနေ့စာရင်း")
 def show_today_report(message):
@@ -916,7 +912,7 @@ def show_today_report(message):
         symbol = "🟢 +" if t_type == 'income' else "🔴 -"
         text += f"[{time_str}] {symbol} {amount:,.0f} Ks ({note})\n"
         
-    text += f"---------------------------\n🟢 ဝင်ငွေ: {total_inc:,.0f} Ks\n🔴 ထွက်ငွေ: {total_exp:,.0f} Ks\n⚖️ လက်ကျန်: {(total_inc - total_exp):,.0f} Ks"
+    text += f"---------------------------\n🟢 ဝင်ငွေ: {total_inc:,.0f} Ks\n🔴 ထွက်ငွေ: {total_exp:,.0f} Ks\n⚖️️ လက်ကျန်: {(total_inc - total_exp):,.0f} Ks"
     bot.send_message(message.chat.id, text)
 
 
@@ -992,27 +988,6 @@ def generate_month_report(chat_id, user_id, yyyy_mm, message_id=None):
         text += "=========================\n"
         text += f"🏆 <b>စုစုပေါင်း {symbol} (Net Profit): {net_profit:,.0f} Ks</b>\n"
         text += "<i>(တွက်ချက်ပုံ: ဝင်ငွေ-ထွက်ငွေ + (နောက်ဆုံးStock-လအစStock))</i>\n"
-        
-        # --- အကြွေးစာရင်း အကျဉ်းချုပ် (Loan Summary with copyable names) ---
-        cursor.execute("SELECT borrower_name, SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' AND loan_type='lend' GROUP BY borrower_name", (user_id,))
-        unpaid_lends = cursor.fetchall()
-        
-        cursor.execute("SELECT borrower_name, SUM(principal) FROM loans WHERE user_id=? AND status='unpaid' AND loan_type='borrow' GROUP BY borrower_name", (user_id,))
-        unpaid_borrows = cursor.fetchall()
-
-        if unpaid_lends or unpaid_borrows:
-            text += "=========================\n"
-            text += "📔 <b>အကြွေးစာရင်း အကျဉ်းချုပ်</b>\n"
-            
-            if unpaid_lends:
-                text += "🟢 <b>ရရန်ကျန်ငွေ (Assets):</b>\n"
-                for name, amt in unpaid_lends:
-                    text += f"   ▪️ <code>{name}</code> : {amt:,.0f} Ks\n"
-                    
-            if unpaid_borrows:
-                text += "🔴 <b>ပေးရန်ကျန်ငွေ (Liabilities):</b>\n"
-                for name, amt in unpaid_borrows:
-                    text += f"   ▪️ <code>{name}</code> : {amt:,.0f} Ks\n"
 
     conn.close()
     
@@ -1614,7 +1589,7 @@ def admin_manual_backup(message):
                 with open('accounting.db', 'rb') as f:
                     bot.send_document(message.chat.id, f, caption="👑 Admin Manual Backup (.db)")
         except Exception as e:
-            bot.send_message(message.chat.id, f"⚠️ Backup ယူရာတွင် အမှားဖြစ်နေပါသည်: {e}")
+            bot.send_message(message.chat.id, f"⚠️️ Backup ယူရာတွင် အမှားဖြစ်နေပါသည်: {e}")
 
 @bot.message_handler(commands=['adminrestore'])
 def admin_restore_menu(message):
@@ -1771,5 +1746,5 @@ if __name__ == '__main__':
     except:
         pass
         
-    print("Bot is running perfectly with Media Broadcast & On-hand Stock Valuation...")
+    print("Bot is running perfectly without loan details in monthly report...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
