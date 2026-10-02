@@ -119,8 +119,6 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_name TEXT, quantity INTEGER DEFAULT 0, buy_price REAL DEFAULT 0, sell_price REAL DEFAULT 0, rented_out INTEGER DEFAULT 0, rented_in INTEGER DEFAULT 0)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS stock_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, action_type TEXT, item_name TEXT, qty INTEGER, trans_id INTEGER, deli_trans_id INTEGER, date TIMESTAMP DEFAULT (datetime('now', 'localtime')))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS salaries (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, emp_name TEXT, amount REAL, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid')''')
-    
-    # ငွေချေး/ငွေပြန်ဆပ် စနစ်အတွက် Table အသစ်
     cursor.execute('''CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, borrower_name TEXT, principal REAL, interest REAL DEFAULT 0, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid', loan_type TEXT DEFAULT 'lend')''')
     
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
@@ -221,17 +219,18 @@ def get_available_stock_html(user_id, condition="quantity > 0"):
     return text + "\n"
 
 def get_total_stock_value(user_id):
-    """ငှားထားသည်များကို မတွက်ဘဲ လက်ရှိဆိုင်ရှိ ကိုယ်ပိုင်လက်ကျန် (quantity - rented_in) သီးသန့်ကိုသာ တန်ဖိုးတွက်မည်"""
+    """မိမိပိုင်ဆိုင်သော Stock အစစ်အမှန် = (လက်ရှိ + သူများကိုငှားထားတာ) - သူများဆီကငှားလာတာ"""
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT quantity, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT quantity, rented_out, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
     rows = cursor.fetchall()
     conn.close()
     
     total_val = 0
-    for qty, r_in, price in rows:
+    for qty, r_out, r_in, price in rows:
+        r_out = r_out or 0
         r_in = r_in or 0
-        owned_qty = max(0, qty - r_in)
+        owned_qty = max(0, (qty + r_out) - r_in)
         if owned_qty > 0:
             total_val += owned_qty * price
     return total_val
@@ -603,7 +602,7 @@ def process_borrow_stock(message):
         if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
         bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3, 2000)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3, 2000)", reply_markup=rent_menu())
 
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပြန်အပ်မည်")
 def ask_return_borrowed(message):
@@ -653,7 +652,7 @@ def process_return_borrowed(message):
         if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
         bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 1, 5000, 1500)", reply_markup=rent_menu())
 
 
 # ----------------- 💸 ငွေချေး / ပြန်ဆပ် စနစ် (Loans) -----------------
@@ -836,10 +835,10 @@ def get_stock_val_page(user_id, page):
         return None, 0, 0
         
     grand_total_value = 0
-    # သူများဆီမှငှားထားတာ (rented_in) ကိုနုတ်ပြီး ကိုယ်ပိုင်လက်ကျန်ကိုသာ တန်ဖိုးတွက်မည်
     for _, qty, r_out, r_in, price in all_rows:
+        r_out = r_out or 0
         r_in = r_in or 0
-        owned_qty = max(0, qty - r_in)
+        owned_qty = max(0, (qty + r_out) - r_in)
         if owned_qty > 0:
             grand_total_value += owned_qty * price
             
@@ -855,7 +854,7 @@ def get_stock_val_page(user_id, page):
         name, qty, r_out, r_in, buy_price = r
         r_out = r_out or 0
         r_in = r_in or 0
-        owned_qty = max(0, qty - r_in)
+        owned_qty = max(0, (qty + r_out) - r_in)
         item_value = owned_qty * buy_price
         
         if qty > 0 or r_out > 0 or r_in > 0:
@@ -912,7 +911,7 @@ def show_today_report(message):
         symbol = "🟢 +" if t_type == 'income' else "🔴 -"
         text += f"[{time_str}] {symbol} {amount:,.0f} Ks ({note})\n"
         
-    text += f"---------------------------\n🟢 ဝင်ငွေ: {total_inc:,.0f} Ks\n🔴 ထွက်ငွေ: {total_exp:,.0f} Ks\n⚖️️ လက်ကျန်: {(total_inc - total_exp):,.0f} Ks"
+    text += f"---------------------------\n🟢 ဝင်ငွေ: {total_inc:,.0f} Ks\n🔴 ထွက်ငွေ: {total_exp:,.0f} Ks\n⚖️ လက်ကျန်: {(total_inc - total_exp):,.0f} Ks"
     bot.send_message(message.chat.id, text)
 
 
@@ -937,7 +936,7 @@ def generate_month_report(chat_id, user_id, yyyy_mm, message_id=None):
     
     if incomes:
         text += "🟢 <b>ဝင်ငွေ ခေါင်းစဉ်များ:</b>\n"
-        for note, amt in incomes: text += f"▪️ {note}: {amt:,.0f} Ks\n"
+        for note, amt in incomes: text += f"▪️️ {note}: {amt:,.0f} Ks\n"
         text += "\n"
     if expenses:
         text += "🔴 <b>ထွက်ငွေ (အသုံးစရိတ်) ခေါင်းစဉ်များ:</b>\n"
@@ -951,14 +950,15 @@ def generate_month_report(chat_id, user_id, yyyy_mm, message_id=None):
     
     tz = pytz.timezone('Asia/Yangon')
     if yyyy_mm == datetime.now(tz).strftime('%Y-%m'):
-        cursor.execute("SELECT quantity, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
+        cursor.execute("SELECT quantity, rented_out, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
         inv_rows = cursor.fetchall()
         ending_stock_val = 0
-        for qty, r_in, price in inv_rows:
+        for qty, r_out, r_in, price in inv_rows:
+            r_out = r_out or 0
             r_in = r_in or 0
-            owned_qty = max(0, qty - r_in)
+            owned_qty = max(0, (qty + r_out) - r_in)
             if owned_qty > 0:
-                ending_stock_val += owned_qty * price # ကိုယ်ပိုင်လက်ကျန်သီးသန့်ဖြင့်တွက်သည်
+                ending_stock_val += owned_qty * price 
                 
         cursor.execute("""
             SELECT s.action_type, s.qty, i.buy_price
@@ -971,9 +971,9 @@ def generate_month_report(chat_id, user_id, yyyy_mm, message_id=None):
         stock_added_value = 0
         stock_removed_value = 0
         for action, qty, buy_price in logs:
-            if action in ['buy', 'old_stock', 'return_lend', 'borrow']:
+            if action in ['buy', 'old_stock']:
                 stock_added_value += (qty * buy_price)
-            elif action in ['sell', 'damage', 'lend', 'return_borrow']:
+            elif action in ['sell', 'damage']:
                 stock_removed_value += (qty * buy_price)
                 
         net_stock_change = stock_added_value - stock_removed_value
@@ -1191,7 +1191,9 @@ def check_total_balance(message):
     conn.close()
     
     current_cash = total_income - total_expense
-    total_stock_val = get_total_stock_value(user_id)
+    
+    # ဤနေရာတွင် get_total_stock_value ကိုခေါ်သုံးထားသောကြောင့် မိမိပိုင်အစစ်အမှန်တန်ဖိုးသာ ဝင်မည်ဖြစ်သည်
+    total_stock_val = get_total_stock_value(user_id) 
     
     # စုစုပေါင်းပိုင်ဆိုင်မှု = Cash + Stock + ရရန်ငွေ - ပေးရန်ငွေ
     total_asset = current_cash + total_stock_val + total_lent - total_borrowed
@@ -1505,12 +1507,23 @@ def process_stock_undo(call):
                 if inv:
                     inv_id, current_qty, r_in, r_out = inv
                     new_qty, new_r_in, new_r_out = current_qty, r_in, r_out
+                    
+                    # Logic အတိအကျပြန်လည်ပြင်ဆင်ခြင်း
                     if a_type in ['buy', 'old_stock']: new_qty -= qty
                     elif a_type in ['sell', 'damage']: new_qty += qty
-                    elif a_type == 'borrow': new_r_in -= qty
-                    elif a_type == 'return_borrow': new_r_in += qty
-                    elif a_type == 'lend': new_qty += qty; new_r_out -= qty
-                    elif a_type == 'return_lend': new_qty -= qty; new_r_out += qty
+                    elif a_type == 'borrow': 
+                        new_r_in -= qty
+                        new_qty -= qty
+                    elif a_type == 'return_borrow': 
+                        new_r_in += qty
+                        new_qty += qty
+                    elif a_type == 'lend': 
+                        new_qty += qty
+                        new_r_out -= qty
+                    elif a_type == 'return_lend': 
+                        new_qty -= qty
+                        new_r_out += qty
+                        
                     cursor.execute("UPDATE inventory SET quantity=?, rented_in=?, rented_out=? WHERE id=?", (new_qty, new_r_in, new_r_out, inv_id))
                 
                 if trans_id: cursor.execute("DELETE FROM transactions WHERE id=?", (trans_id,))
@@ -1520,7 +1533,7 @@ def process_stock_undo(call):
                 conn.commit()
                 bot.edit_message_text(text="✅ ရွေးချယ်ထားသော Stock မှတ်တမ်းကို ဖျက်လိုက်ပါပြီ။", chat_id=call.message.chat.id, message_id=call.message.message_id)
             else:
-                bot.edit_message_text(text="⚠️ မှတ်တမ်း ရှာမတွေ့ပါ။", chat_id=call.message.chat.id, message_id=call.message.message_id)
+                bot.edit_message_text(text="⚠️️ မှတ်တမ်း ရှာမတွေ့ပါ။", chat_id=call.message.chat.id, message_id=call.message.message_id)
     except Exception as e:
         bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
@@ -1589,7 +1602,7 @@ def admin_manual_backup(message):
                 with open('accounting.db', 'rb') as f:
                     bot.send_document(message.chat.id, f, caption="👑 Admin Manual Backup (.db)")
         except Exception as e:
-            bot.send_message(message.chat.id, f"⚠️️ Backup ယူရာတွင် အမှားဖြစ်နေပါသည်: {e}")
+            bot.send_message(message.chat.id, f"⚠️ Backup ယူရာတွင် အမှားဖြစ်နေပါသည်: {e}")
 
 @bot.message_handler(commands=['adminrestore'])
 def admin_restore_menu(message):
@@ -1746,5 +1759,5 @@ if __name__ == '__main__':
     except:
         pass
         
-    print("Bot is running perfectly without loan details in monthly report...")
+    print("Bot is running perfectly. All undo and stock valuation bugs fixed...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
