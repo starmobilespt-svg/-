@@ -13,7 +13,7 @@ from datetime import datetime
 import pymongo
 
 # ----------------- MongoDB Setup -----------------
-MONGO_URI = "mongodb+srv://User:310@cluster0.oys0fgi.mongodb.net/?appName=Cluster0" 
+MONGO_URI = "mongodb+srv://User:310199@cluster0.oys0fgi.mongodb.net/?appName=Cluster0" 
 
 def sync_db_from_mongo():
     if MONGO_URI == "YOUR_MONGODB_URI_HERE": return
@@ -107,7 +107,7 @@ def keep_alive():
     mongo_thread.start()
 # -----------------------------------------------------------------
 
-TOKEN = "8580240:AAFjFObELZgZfsDziMlxBiWsvyhpRy1KTnI"
+TOKEN = "8580240882:AAFjFObELZgZfsDziMlxBiWsvyhpRy1KTnI"
 bot = telebot.TeleBot(TOKEN)
 ADMIN_IDS = [8668319365] 
 
