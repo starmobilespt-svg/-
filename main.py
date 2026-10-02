@@ -119,8 +119,6 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_name TEXT, quantity INTEGER DEFAULT 0, buy_price REAL DEFAULT 0, sell_price REAL DEFAULT 0, rented_out INTEGER DEFAULT 0, rented_in INTEGER DEFAULT 0)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS stock_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, action_type TEXT, item_name TEXT, qty INTEGER, trans_id INTEGER, deli_trans_id INTEGER, date TIMESTAMP DEFAULT (datetime('now', 'localtime')))''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS salaries (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, emp_name TEXT, amount REAL, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid')''')
-    
-    # ငွေချေး/ငွေပြန်ဆပ် စနစ်အတွက် Table အသစ်
     cursor.execute('''CREATE TABLE IF NOT EXISTS loans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, borrower_name TEXT, principal REAL, interest REAL DEFAULT 0, date TIMESTAMP DEFAULT (datetime('now', 'localtime')), status TEXT DEFAULT 'unpaid', loan_type TEXT DEFAULT 'lend')''')
     
     try: cursor.execute('ALTER TABLE inventory ADD COLUMN rented_out INTEGER DEFAULT 0')
@@ -221,16 +219,19 @@ def get_available_stock_html(user_id, condition="quantity > 0"):
     return text + "\n"
 
 def get_total_stock_value(user_id):
-    """ငှားထားသည်များကို မတွက်ဘဲ လက်ရှိဆိုင်ရှိလက်ကျန်(quantity) သီးသန့်ကိုသာ တန်ဖိုးတွက်မည်"""
+    """ငှားထားသည်များကို မတွက်ဘဲ လက်ရှိဆိုင်ရှိ ကိုယ်ပိုင်လက်ကျန် (quantity - rented_in) သီးသန့်ကိုသာ တန်ဖိုးတွက်မည်"""
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT quantity, buy_price FROM inventory WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT quantity, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
     rows = cursor.fetchall()
     conn.close()
     
     total_val = 0
-    for qty, price in rows:
-        total_val += qty * price
+    for qty, r_in, price in rows:
+        r_in = r_in or 0
+        owned_qty = max(0, qty - r_in)
+        if owned_qty > 0:
+            total_val += owned_qty * price
     return total_val
 
 # ----------------- Menus -----------------
@@ -381,7 +382,7 @@ def process_sell_stock(message):
         
         if not row or row[1] < qty:
             conn.close()
-            bot.send_message(message.chat.id, f"⚠️ '{name}' အတွက် Stock မလုံလောက်ပါ။", reply_markup=stock_menu())
+            bot.send_message(message.chat.id, f"⚠️️ '{name}' အတွက် Stock မလုံလောက်ပါ။", reply_markup=stock_menu())
             return
             
         new_qty = row[1] - qty
@@ -600,7 +601,7 @@ def process_borrow_stock(message):
         if deli_fee > 0: text += f"\n🚚 ပို့ဆောင်ခ (ထွက်ငွေ): {deli_fee:,.0f} Ks"
         bot.send_message(message.chat.id, text, reply_markup=rent_menu())
     except Exception:
-        bot.send_message(message.chat.id, "⚠️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3, 2000)", reply_markup=rent_menu())
+        bot.send_message(message.chat.id, "⚠️️ Format မှားယွင်းနေပါသည်။ (ဥပမာ: စက်ဘီး, 3, 2000)", reply_markup=rent_menu())
 
 @bot.message_handler(func=lambda m: m.text == "📤 အငှားပြန်အပ်မည်")
 def ask_return_borrowed(message):
@@ -833,10 +834,13 @@ def get_stock_val_page(user_id, page):
         return None, 0, 0
         
     grand_total_value = 0
-    # ငှားထားသည်များကို မတွက်ဘဲ quantity (လက်ကျန်သီးသန့်) ဖြင့်သာ တွက်သည်
+    # သူများဆီမှငှားထားတာ (rented_in) ကိုနုတ်ပြီး ကိုယ်ပိုင်လက်ကျန်ကိုသာ တန်ဖိုးတွက်မည်
     for _, qty, r_out, r_in, price in all_rows:
-        grand_total_value += qty * price
-        
+        r_in = r_in or 0
+        owned_qty = max(0, qty - r_in)
+        if owned_qty > 0:
+            grand_total_value += owned_qty * price
+            
     per_page = 5
     total_pages = (total_items + per_page - 1) // per_page
     
@@ -849,17 +853,21 @@ def get_stock_val_page(user_id, page):
         name, qty, r_out, r_in, buy_price = r
         r_out = r_out or 0
         r_in = r_in or 0
-        item_value = qty * buy_price
+        owned_qty = max(0, qty - r_in)
+        item_value = owned_qty * buy_price
         
         if qty > 0 or r_out > 0 or r_in > 0:
             text += f"🏷 <b>{name}</b>\n"
-            text += f"   📦 လက်ကျန်: {qty} ခု\n"
+            text += f"   📦 လက်ကျန်စုစုပေါင်း: {qty} ခု\n"
             if r_out > 0: text += f"   📤 သူများကိုငှားထား: {r_out} ခု\n"
             if r_in > 0: text += f"   📥 သူများဆီမှငှားထား: {r_in} ခု\n"
-            text += f"   💰 တန်ဖိုး (လက်ကျန်): {qty} x {buy_price:,.0f} = <b>{item_value:,.0f} Ks</b>\n\n"
-        
+            if owned_qty > 0:
+                text += f"   💰 ကိုယ်ပိုင်တန်ဖိုး: {owned_qty} x {buy_price:,.0f} = <b>{item_value:,.0f} Ks</b>\n\n"
+            else:
+                text += f"   💰 ကိုယ်ပိုင်တန်ဖိုး: 0 Ks\n\n"
+            
     text += f"=========================\n"
-    text += f"🏆 <b>စုစုပေါင်း Stock တန်ဖိုး (လက်ကျန်သာ): {grand_total_value:,.0f} Ks</b>"
+    text += f"🏆 <b>စုစုပေါင်း Stock တန်ဖိုး (ကိုယ်ပိုင်သာ): {grand_total_value:,.0f} Ks</b>"
     return text, total_pages, grand_total_value
 
 def send_stock_val_page(chat_id, user_id, page, message_id=None):
@@ -947,12 +955,15 @@ def generate_month_report(chat_id, user_id, yyyy_mm, message_id=None):
     
     tz = pytz.timezone('Asia/Yangon')
     if yyyy_mm == datetime.now(tz).strftime('%Y-%m'):
-        cursor.execute("SELECT quantity, buy_price FROM inventory WHERE user_id=?", (user_id,))
+        cursor.execute("SELECT quantity, rented_in, buy_price FROM inventory WHERE user_id=?", (user_id,))
         inv_rows = cursor.fetchall()
         ending_stock_val = 0
-        for qty, price in inv_rows:
-            ending_stock_val += qty * price # လက်ကျန်သီးသန့်ဖြင့်တွက်သည်
-            
+        for qty, r_in, price in inv_rows:
+            r_in = r_in or 0
+            owned_qty = max(0, qty - r_in)
+            if owned_qty > 0:
+                ending_stock_val += owned_qty * price # ကိုယ်ပိုင်လက်ကျန်သီးသန့်ဖြင့်တွက်သည်
+                
         cursor.execute("""
             SELECT s.action_type, s.qty, i.buy_price
             FROM stock_logs s
@@ -1302,7 +1313,7 @@ def view_wage_log(message):
         for r in rows:
             amt, date_str, status = r[0], r[1].split()[0], r[2]
             if amt < 0:
-                text += f"▪️️ {date_str} : ရှင်းပေးငွေ/ထုတ်ငွေ {-amt:,.0f} Ks (✅)\n"
+                text += f"▪ {date_str} : ရှင်းပေးငွေ/ထုတ်ငွေ {-amt:,.0f} Ks (✅)\n"
             else:
                 status_icon = "✅" if status == 'paid' else "⏳"
                 text += f"▪️ {date_str} : {amt:,.0f} Ks ({status_icon})\n"
@@ -1453,9 +1464,9 @@ def process_delete(call):
             conn.commit()
         bot.edit_message_text(text="✅ ရွေးချယ်ထားသော စာရင်းကို ဖျက်လိုက်ပါပြီ။", chat_id=call.message.chat.id, message_id=call.message.message_id)
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"⚠️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
+        bot.send_message(call.message.chat.id, f"⚠️️ ဖျက်ရာတွင် အမှားရှိနေပါသည်: {e}")
 
-# ----------------- ↩️️ မှားသွားလျှင် ပြန်ဖျက်မည် Stock Undo (Pagination) -----------------
+# ----------------- ↩ မှားသွားလျှင် ပြန်ဖျက်မည် Stock Undo (Pagination) -----------------
 def send_undo_stock_page(chat_id, user_id, page, message_id=None):
     conn = sqlite3.connect('accounting.db')
     cursor = conn.cursor()
@@ -1558,12 +1569,10 @@ def admin_panel_help(message):
 def admin_broadcast_start(message):
     if message.from_user.id not in ADMIN_IDS: return
     
-    # စာသားတန်းပါလာလျှင် (ဥပမာ - /broadcast မင်္ဂလာပါ) တန်းပို့မည်
     text = message.text.replace('/broadcast', '').strip()
     if text:
         send_broadcast(message, text_only=text)
     else:
-        # ဘာမှမပါလျှင် ပုံ/စာသား ကို တောင်းမည်
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         markup.add("❌ မလုပ်တော့ပါ (Cancel)")
         msg = bot.send_message(message.chat.id, "📢 <b>User အားလုံးထံ ကြေညာချက်ပေးပို့ခြင်း</b>\n\nပေးပို့လိုသော စာသား၊ ပုံ (Photo)၊ သို့မဟုတ် ဗီဒီယို (Video) ကို ယခု ပေးပို့ပါ။\n(စာသားများကို Format အလှဆင်၍လည်း ပေးပို့နိုင်ပါသည်။)", parse_mode="HTML", reply_markup=markup)
@@ -1590,7 +1599,6 @@ def send_broadcast(message, text_only=None):
             if text_only:
                 bot.send_message(user_id, f"📢 <b>Admin Announcement:</b>\n\n{text_only}", parse_mode="HTML")
             else:
-                # ပုံ၊ ဗီဒီယို၊ ဖိုင် အားလုံးကို Forward Tag မပါဘဲ Copy ကူး၍ ပို့ပေးမည်
                 bot.copy_message(chat_id=user_id, from_chat_id=message.chat.id, message_id=message.message_id)
             success += 1
         except Exception as e:
